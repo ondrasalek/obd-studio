@@ -1,0 +1,7 @@
+pub const CENTRAL_ELECTRONICS_TX_ID: u32 = 0x70E;
+pub const CENTRAL_ELECTRONICS_RX_ID: u32 = 0x778;
+pub const CENTRAL_ELECTRONICS_ID_DID: &str = "22F187";
+
+const _: () = assert!(CENTRAL_ELECTRONICS_TX_ID <= 0x7FF);
+const _: () = assert!(CENTRAL_ELECTRONICS_RX_ID <= 0x7FF);
+const _: () = assert!(CENTRAL_ELECTRONICS_TX_ID != CENTRAL_ELECTRONICS_RX_ID);
