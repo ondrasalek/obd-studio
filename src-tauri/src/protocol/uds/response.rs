@@ -37,7 +37,7 @@ pub fn parse_uds_response(
     reply: StnReply,
 ) -> AppResult<UdsResponse> {
     let rx_prefix = format!("{:03X}", request.rx_id);
-    let payload_hex = reply
+    let payloads: Vec<String> = reply
         .lines
         .iter()
         .filter_map(|line| {
@@ -51,7 +51,20 @@ pub fn parse_uds_response(
                 .filter(|payload| payload.len() >= 2 && payload.len() % 2 == 0)
                 .map(ToOwned::to_owned)
         })
-        .next()
+        .collect();
+    let expected_service = request.payload[0].wrapping_add(0x40);
+    let expected_prefix = format!("{expected_service:02X}");
+    let payload_hex = payloads
+        .iter()
+        .find(|payload| payload.starts_with(&expected_prefix))
+        .or_else(|| {
+            payloads.iter().rev().find(|payload| {
+                !(payload.starts_with("7F")
+                    && payload.len() >= 6
+                    && payload[4..6].eq_ignore_ascii_case("78"))
+            })
+        })
+        .cloned()
         .ok_or_else(|| {
             AppError::adapter(format!(
                 "Odpověď neobsahuje očekávané RX CAN ID 0x{:03X}.",
@@ -67,7 +80,6 @@ pub fn parse_uds_response(
             description: nrc_description(payload[2]).to_owned(),
         })
     } else {
-        let expected_service = request.payload[0].wrapping_add(0x40);
         if payload.first() != Some(&expected_service) {
             return Err(AppError::adapter(format!(
                 "Neočekávaná UDS služba v odpovědi: očekávána 0x{expected_service:02X}."
@@ -150,5 +162,14 @@ mod tests {
         let response = parse_uds_response(2, &request(), reply).unwrap();
         assert!(matches!(response.status, UdsResponseStatus::Negative));
         assert_eq!(response.negative_response.unwrap().code, "31");
+    }
+
+    #[test]
+    fn prefers_positive_response_after_response_pending() {
+        let reply =
+            StnReply::parse("7787F2278\r77862F18730344C39303630323750\r>".into(), "STPX").unwrap();
+        let response = parse_uds_response(3, &request(), reply).unwrap();
+        assert!(matches!(response.status, UdsResponseStatus::Positive));
+        assert_eq!(response.payload_hex, "62F18730344C39303630323750");
     }
 }

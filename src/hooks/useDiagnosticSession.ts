@@ -7,16 +7,24 @@ import {
   normalizeCommandError,
   onConnectionState,
   onDiagnosticLog,
+  probeDids as invokeProbeDids,
   readCentralElectronics as invokeReadCentralElectronics,
+  readLiveData as invokeReadLiveData,
+  scanControlUnits as invokeScanControlUnits,
   sendStandardObdQuery,
 } from "@/lib/ipc";
 import type {
   CommandError,
   ConnectionInfo,
   ConnectionState,
+  ControlUnitArea,
+  ControlUnitAreaSnapshot,
   DiagnosticProfile,
   DiagnosticLogEntry,
   DiagnosticLogEvent,
+  DidProbeSnapshot,
+  LiveDataGroup,
+  LiveDataSnapshot,
   SerialPortInfo,
   StandardObdQuery,
   StandardObdResponse,
@@ -24,6 +32,10 @@ import type {
 } from "@/types/diagnostics";
 
 const MAX_LOG_ENTRIES = 500;
+
+function didProbeKey(area: ControlUnitArea, unitKey: string): string {
+  return `${area}:${unitKey}`;
+}
 
 export function useDiagnosticSession() {
   const runtimeAvailable = isTauriRuntime();
@@ -49,6 +61,18 @@ export function useDiagnosticSession() {
   const [lastUdsResponse, setLastUdsResponse] = useState<UdsResponse>();
   const [lastObdResponse, setLastObdResponse] =
     useState<StandardObdResponse>();
+  const [liveSnapshots, setLiveSnapshots] = useState<
+    Partial<Record<LiveDataGroup, LiveDataSnapshot>>
+  >({});
+  const [loadingGroup, setLoadingGroup] = useState<LiveDataGroup>();
+  const [controlUnitSnapshots, setControlUnitSnapshots] = useState<
+    Partial<Record<ControlUnitArea, ControlUnitAreaSnapshot>>
+  >({});
+  const [scanningArea, setScanningArea] = useState<ControlUnitArea>();
+  const [didProbeSnapshots, setDidProbeSnapshots] = useState<
+    Record<string, DidProbeSnapshot>
+  >({});
+  const [probingUnitKey, setProbingUnitKey] = useState<string>();
   const [error, setError] = useState<CommandError>();
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -149,6 +173,9 @@ export function useDiagnosticSession() {
       setConnection(undefined);
       setLastUdsResponse(undefined);
       setLastObdResponse(undefined);
+      setLiveSnapshots({});
+      setControlUnitSnapshots({});
+      setDidProbeSnapshots({});
       setConnectionState("disconnected");
     } catch (caught) {
       setError(normalizeCommandError(caught));
@@ -185,10 +212,67 @@ export function useDiagnosticSession() {
     }
   }, []);
 
+  const refreshLiveData = useCallback(async (group: LiveDataGroup) => {
+    setBusy(true);
+    setLoadingGroup(group);
+    setError(undefined);
+    try {
+      const snapshot = await invokeReadLiveData(group);
+      setLiveSnapshots((current) => ({ ...current, [group]: snapshot }));
+    } catch (caught) {
+      setError(normalizeCommandError(caught));
+    } finally {
+      setLoadingGroup(undefined);
+      setBusy(false);
+    }
+  }, []);
+
+  const scanControlUnits = useCallback(async (area: ControlUnitArea) => {
+    setBusy(true);
+    setScanningArea(area);
+    setError(undefined);
+    try {
+      const snapshot = await invokeScanControlUnits(area);
+      setControlUnitSnapshots((current) => ({
+        ...current,
+        [area]: snapshot,
+      }));
+    } catch (caught) {
+      setError(normalizeCommandError(caught));
+    } finally {
+      setScanningArea(undefined);
+      setBusy(false);
+    }
+  }, []);
+
+  const probeDids = useCallback(
+    async (area: ControlUnitArea, unitKey: string, dids: number[]) => {
+      setBusy(true);
+      setProbingUnitKey(unitKey);
+      setError(undefined);
+      try {
+        const snapshot = await invokeProbeDids(area, unitKey, dids);
+        setDidProbeSnapshots((current) => ({
+          ...current,
+          [didProbeKey(area, unitKey)]: snapshot,
+        }));
+      } catch (caught) {
+        setError(normalizeCommandError(caught));
+      } finally {
+        setProbingUnitKey(undefined);
+        setBusy(false);
+      }
+    },
+    [],
+  );
+
   const selectProfile = useCallback((profile: DiagnosticProfile) => {
     setSelectedProfile(profile);
     setLastUdsResponse(undefined);
     setLastObdResponse(undefined);
+    setLiveSnapshots({});
+    setControlUnitSnapshots({});
+    setDidProbeSnapshots({});
     setError(undefined);
   }, []);
 
@@ -206,6 +290,12 @@ export function useDiagnosticSession() {
     logs,
     lastUdsResponse,
     lastObdResponse,
+    liveSnapshots,
+    loadingGroup,
+    controlUnitSnapshots,
+    scanningArea,
+    didProbeSnapshots,
+    probingUnitKey,
     error,
     busy,
     refreshing,
@@ -214,6 +304,9 @@ export function useDiagnosticSession() {
     disconnect,
     runStandardObdQuery,
     readCentralElectronics,
+    refreshLiveData,
+    scanControlUnits,
+    probeDids,
     clearLogs,
   };
 }

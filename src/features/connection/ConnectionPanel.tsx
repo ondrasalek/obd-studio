@@ -95,7 +95,7 @@ export function ConnectionPanel({
   const connected = connectionState === "busReady";
 
   return (
-    <Card>
+    <Card size="sm" className="shrink-0">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Cable className="size-4 text-primary" aria-hidden="true" />
@@ -125,92 +125,102 @@ export function ConnectionPanel({
           </Alert>
         ) : null}
 
-        <div className="space-y-2">
-          <label
-            htmlFor="diagnostic-profile"
-            className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
-          >
-            <Globe2 className="size-3.5" aria-hidden="true" />
-            Diagnostický profil
-          </label>
-          <Select
-            value={selectedProfile}
-            onValueChange={(value) =>
-              onProfileChange(value as DiagnosticProfile)
-            }
-            disabled={busy || connected}
-          >
-            <SelectTrigger id="diagnostic-profile" className="h-10 w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent position="popper">
-              <SelectItem value="genericObd2">
-                Univerzální OBD-II · AUTO
-              </SelectItem>
-              <SelectItem value="vwMqb">
-                Volkswagen Group MQB · UDS
-              </SelectItem>
-            </SelectContent>
-          </Select>
-          <p className="text-[11px] leading-4 text-muted-foreground">
-            {selectedProfile === "genericObd2"
-              ? "Automaticky vyhledá legislativní OBD-II/EOBD/JOBD protokol napříč značkami."
-              : "Experimentální fyzická UDS komunikace s jednotkami platformy MQB."}
-          </p>
-        </div>
+        {!connected ? (
+          <>
+            <div className="space-y-2">
+              <label
+                htmlFor="diagnostic-profile"
+                className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
+              >
+                <Globe2 className="size-3.5" aria-hidden="true" />
+                Diagnostický profil
+              </label>
+              <Select
+                value={selectedProfile}
+                onValueChange={(value) =>
+                  onProfileChange(value as DiagnosticProfile)
+                }
+                disabled={busy}
+              >
+                <SelectTrigger id="diagnostic-profile" className="h-10 w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent position="popper">
+                  <SelectItem value="genericObd2">
+                    Univerzální OBD-II · AUTO
+                  </SelectItem>
+                  <SelectItem value="vwMqb">
+                    Volkswagen Group MQB · UDS
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] leading-4 text-muted-foreground">
+                {selectedProfile === "genericObd2"
+                  ? "Automaticky vyhledá legislativní OBD-II/EOBD/JOBD protokol napříč značkami."
+                  : "Experimentální fyzická UDS komunikace s jednotkami platformy MQB."}
+              </p>
+            </div>
 
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <label htmlFor="serial-port" className="text-xs font-medium text-muted-foreground">
-              Sériový port
-            </label>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  disabled={busy || refreshing || !runtimeAvailable}
-                  onClick={() => void onRefresh()}
-                  aria-label="Obnovit seznam sériových portů"
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label
+                  htmlFor="serial-port"
+                  className="text-xs font-medium text-muted-foreground"
                 >
-                  <RefreshCw
-                    className={refreshing ? "animate-spin" : undefined}
-                    aria-hidden="true"
-                  />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Obnovit porty</TooltipContent>
-            </Tooltip>
-          </div>
+                  Sériový port
+                </label>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      disabled={busy || refreshing || !runtimeAvailable}
+                      onClick={() => void onRefresh()}
+                      aria-label="Obnovit seznam sériových portů"
+                    >
+                      <RefreshCw
+                        className={refreshing ? "animate-spin" : undefined}
+                        aria-hidden="true"
+                      />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Obnovit porty</TooltipContent>
+                </Tooltip>
+              </div>
 
-          <Select
-            value={selectedPort}
-            onValueChange={onPortChange}
-            disabled={busy || connected || ports.length === 0}
-          >
-            <SelectTrigger id="serial-port" className="h-10 w-full font-mono text-xs">
-              <SelectValue placeholder="Nebyl nalezen žádný USB port" />
-            </SelectTrigger>
-            <SelectContent position="popper">
-              {ports.map((port) => (
-                <SelectItem key={port.path} value={port.path}>
-                  <Usb className="size-3.5" aria-hidden="true" />
-                  <span className="truncate">{port.displayName}</span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+              <Select
+                value={selectedPort}
+                onValueChange={onPortChange}
+                disabled={busy || ports.length === 0}
+              >
+                <SelectTrigger
+                  id="serial-port"
+                  className="h-10 w-full font-mono text-xs"
+                >
+                  <SelectValue placeholder="Nebyl nalezen žádný USB port" />
+                </SelectTrigger>
+                <SelectContent position="popper">
+                  {ports.map((port) => (
+                    <SelectItem key={port.path} value={port.path}>
+                      <Usb className="size-3.5" aria-hidden="true" />
+                      <span className="truncate">{port.displayName}</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
 
-          {selected ? (
-            <p className="truncate font-mono text-[11px] text-muted-foreground">
-              {selected.manufacturer ?? "USB zařízení"}
-              {selected.vid != null && selected.pid != null
-                ? ` · ${selected.vid.toString(16).padStart(4, "0")}:${selected.pid.toString(16).padStart(4, "0")}`
-                : ""}
-            </p>
-          ) : null}
-        </div>
+              {selected ? (
+                <p className="truncate font-mono text-[11px] text-muted-foreground">
+                  {selected.manufacturer ?? "USB zařízení"}
+                  {selected.vid != null && selected.pid != null
+                    ? ` · ${selected.vid.toString(16).padStart(4, "0")}:${selected.pid.toString(16).padStart(4, "0")}`
+                    : ""}
+                </p>
+              ) : null}
+            </div>
+          </>
+        ) : null}
 
         {error ? (
           <Alert variant="destructive">

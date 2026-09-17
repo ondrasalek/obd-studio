@@ -20,7 +20,7 @@ export function AppShell({ children, connectionState }: AppShellProps) {
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
       <header className="border-b border-border/80 bg-card/40">
-        <div className="mx-auto flex h-16 w-full max-w-[1600px] items-center justify-between px-6">
+        <div className="mx-auto flex h-14 w-full max-w-[1920px] items-center justify-between px-4">
           <div className="flex items-center gap-3">
             <div className="flex size-9 items-center justify-center rounded-lg border border-primary/20 bg-primary/10 text-primary">
               <CarFront className="size-5" aria-hidden="true" />
@@ -31,7 +31,7 @@ export function AppShell({ children, connectionState }: AppShellProps) {
                   OBD Studio
                 </h1>
                 <Badge variant="outline" className="font-mono text-[10px]">
-                  v0.2.1
+                  v0.3.0
                 </Badge>
               </div>
               <p className="text-xs text-muted-foreground">
@@ -67,7 +67,7 @@ export function AppShell({ children, connectionState }: AppShellProps) {
         </div>
       </header>
 
-      <main className="mx-auto flex min-h-0 w-full max-w-[1600px] flex-1 flex-col p-6">
+      <main className="mx-auto flex min-h-0 w-full max-w-[1920px] flex-1 flex-col p-4">
         {children}
       </main>
     </div>

@@ -9,8 +9,8 @@ mod vehicle;
 
 use app_state::AppState;
 use commands::{
-    connect_port, disconnect_port, list_serial_ports, read_central_electronics,
-    send_standard_obd_query, send_uds_payload,
+    connect_port, disconnect_port, list_serial_ports, probe_dids, read_central_electronics,
+    read_live_data, scan_control_units, send_standard_obd_query, send_uds_payload,
 };
 use tauri::Manager;
 
@@ -27,6 +27,9 @@ pub fn run() {
             disconnect_port,
             send_standard_obd_query,
             send_uds_payload,
+            read_live_data,
+            scan_control_units,
+            probe_dids,
             read_central_electronics
         ])
         .run(tauri::generate_context!())

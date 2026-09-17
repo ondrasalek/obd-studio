@@ -114,8 +114,19 @@ impl<'a> StnClient<'a> {
     }
 
     pub fn send_uds(&mut self, request: &ValidatedUdsRequest) -> AppResult<StnReply> {
-        self.configure_target(request.tx_id, request.rx_id)?;
+        self.select_target(request.tx_id, request.rx_id)?;
 
+        self.send_uds_to_selected_target(request)
+    }
+
+    pub fn select_target(&mut self, tx_id: u32, rx_id: u32) -> AppResult<()> {
+        self.configure_target(tx_id, rx_id)
+    }
+
+    pub fn send_uds_to_selected_target(
+        &mut self,
+        request: &ValidatedUdsRequest,
+    ) -> AppResult<StnReply> {
         let command = format!(
             "STPX h:{:03X},d:{},t:{},r:1",
             request.tx_id, request.payload_hex, request.timeout_ms

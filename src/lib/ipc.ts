@@ -4,8 +4,13 @@ import type {
   CommandError,
   ConnectionInfo,
   ConnectionStateEvent,
+  ControlUnitArea,
+  ControlUnitAreaSnapshot,
   DiagnosticProfile,
   DiagnosticLogEvent,
+  DidProbeSnapshot,
+  LiveDataGroup,
+  LiveDataSnapshot,
   SerialPortInfo,
   StandardObdQuery,
   StandardObdResponse,
@@ -39,6 +44,26 @@ export async function sendStandardObdQuery(
   query: StandardObdQuery,
 ): Promise<StandardObdResponse> {
   return invoke<StandardObdResponse>("send_standard_obd_query", { query });
+}
+
+export async function readLiveData(
+  group: LiveDataGroup,
+): Promise<LiveDataSnapshot> {
+  return invoke<LiveDataSnapshot>("read_live_data", { group });
+}
+
+export async function scanControlUnits(
+  area: ControlUnitArea,
+): Promise<ControlUnitAreaSnapshot> {
+  return invoke<ControlUnitAreaSnapshot>("scan_control_units", { area });
+}
+
+export async function probeDids(
+  area: ControlUnitArea,
+  unitKey: string,
+  dids: number[],
+): Promise<DidProbeSnapshot> {
+  return invoke<DidProbeSnapshot>("probe_dids", { area, unitKey, dids });
 }
 
 export function onDiagnosticLog(

@@ -6,6 +6,43 @@ export type ConnectionState =
 
 export type DiagnosticProfile = "genericObd2" | "vwMqb";
 
+export type LiveDataGroup = "engine" | "injectors" | "dpf" | "turbo";
+
+export type ControlUnitArea =
+  | "transmission"
+  | "chassis"
+  | "interior"
+  | "lighting"
+  | "exterior"
+  | "climate"
+  | "infotainment"
+  | "body"
+  | "windows"
+  | "drivingModes";
+
+export type ControlUnitScanStatus = "detected" | "notDetected" | "error";
+
+export type DidProbeStatus =
+  | "readable"
+  | "unsupported"
+  | "rejected"
+  | "error";
+
+export type LiveDataStatus = "available" | "unsupported" | "error";
+
+export type LiveDataAssessmentLevel =
+  | "normal"
+  | "information"
+  | "attention"
+  | "critical"
+  | "unknown";
+
+export interface LiveDataAssessment {
+  level: LiveDataAssessmentLevel;
+  label: string;
+  detail: string;
+}
+
 export type StandardObdQuery =
   | "supportedPids"
   | "vehicleIdentificationNumber"
@@ -75,6 +112,67 @@ export interface StandardObdResponse {
   vin: string | null;
   diagnosticTroubleCodes: string[];
   rawResponse: string;
+}
+
+export interface LiveDataValue {
+  key: string;
+  label: string;
+  did: string;
+  value: number | null;
+  unit: string;
+  precision: number;
+  status: LiveDataStatus;
+  assessment: LiveDataAssessment;
+  rawResponse: string | null;
+  detail: string | null;
+}
+
+export interface LiveDataSnapshot {
+  group: LiveDataGroup;
+  ecuName: string;
+  txId: number;
+  rxId: number;
+  capturedAtMs: number;
+  values: LiveDataValue[];
+}
+
+export interface ControlUnitInfo {
+  key: string;
+  address: string;
+  name: string;
+  txId: number;
+  rxId: number;
+  status: ControlUnitScanStatus;
+  partNumber: string | null;
+  softwareVersion: string | null;
+  dtcCount: number | null;
+  detail: string | null;
+}
+
+export interface ControlUnitAreaSnapshot {
+  area: ControlUnitArea;
+  capturedAtMs: number;
+  units: ControlUnitInfo[];
+}
+
+export interface DidProbeValue {
+  did: string;
+  status: DidProbeStatus;
+  dataHex: string | null;
+  payloadHex: string | null;
+  rawResponse: string | null;
+  detail: string;
+}
+
+export interface DidProbeSnapshot {
+  area: ControlUnitArea;
+  unitKey: string;
+  unitName: string;
+  address: string;
+  txId: number;
+  rxId: number;
+  capturedAtMs: number;
+  values: DidProbeValue[];
 }
 
 export interface CommandError {
