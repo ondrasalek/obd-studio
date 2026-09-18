@@ -12,9 +12,11 @@ import type {
   LiveDataGroup,
   LiveDataSnapshot,
   SerialPortInfo,
+  ServiceOperationResult,
   StandardObdQuery,
   StandardObdResponse,
   UdsResponse,
+  VehicleCapability,
 } from "@/types/diagnostics";
 
 export function isTauriRuntime(): boolean {
@@ -34,6 +36,18 @@ export async function connectPort(
 
 export async function disconnectPort(): Promise<void> {
   return invoke("disconnect_port");
+}
+
+export async function listVehicleCapabilities(
+  profile: DiagnosticProfile,
+): Promise<VehicleCapability[]> {
+  return invoke<VehicleCapability[]>("list_vehicle_capabilities", { profile });
+}
+
+export async function clearEmissionDtcs(
+  confirmation: string,
+): Promise<ServiceOperationResult> {
+  return invoke<ServiceOperationResult>("clear_emission_dtcs", { confirmation });
 }
 
 export async function readCentralElectronics(): Promise<UdsResponse> {

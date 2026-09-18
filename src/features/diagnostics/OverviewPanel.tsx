@@ -6,6 +6,8 @@ import {
   ChevronRight,
   CircleGauge,
   DatabaseZap,
+  LoaderCircle,
+  ScanSearch,
   ShieldCheck,
   Sparkles,
   TriangleAlert,
@@ -21,6 +23,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
+import { Progress } from "@/components/ui/progress";
 import type {
   ConnectionInfo,
   ControlUnitArea,
@@ -44,7 +47,10 @@ interface OverviewPanelProps {
     Record<ControlUnitArea, ControlUnitAreaSnapshot>
   >;
   autoReadEnabled: boolean;
+  fullScanRunning: boolean;
+  scanProgress: { completed: number; total: number };
   onAutoReadEnabledChange: (enabled: boolean) => void;
+  onScanAll: () => Promise<void>;
   onSelect: (section: DiagnosticSectionId) => void;
 }
 
@@ -65,7 +71,10 @@ export function OverviewPanel({
   snapshots,
   controlUnitSnapshots,
   autoReadEnabled,
+  fullScanRunning,
+  scanProgress,
   onAutoReadEnabledChange,
+  onScanAll,
   onSelect,
 }: OverviewPanelProps) {
   const loadedGroups =
@@ -113,11 +122,15 @@ export function OverviewPanel({
           ) : (
             <Alert className="border-emerald-500/20 bg-emerald-500/5">
               <ShieldCheck className="text-emerald-400" aria-hidden="true" />
-              <AlertTitle>Read-only diagnostická session</AlertTitle>
+              <AlertTitle>
+                {profile === "vwMqb"
+                  ? "Read-only MQB diagnostická session"
+                  : "Standardní OBD-II diagnostická session"}
+              </AlertTitle>
               <AlertDescription>
-                Připojení je aktivní. Identifikace, živá data a stav DTC používají
-                pouze čtecí UDS služby 0x19 a 0x22; zápis, mazání závad a servisní
-                procedury zůstávají blokované.
+                {profile === "vwMqb"
+                  ? "Identifikace, živá data a stav DTC používají pouze čtecí UDS služby 0x19 a 0x22. Zápis, mazání závad a servisní procedury zůstávají blokované."
+                  : "Identifikace, emisní DTC a živá data používají standardní OBD-II. Oddělená servisní akce Mode 04 je dostupná jen s potvrzením a bezpečnostními kontrolami."}
               </AlertDescription>
             </Alert>
           )}
@@ -135,7 +148,7 @@ export function OverviewPanel({
                   Automatické načítání
                 </span>
                 <span className="mt-0.5 block text-[10px] text-muted-foreground">
-                  Jednorázově načte data po otevření diagnostické oblasti
+                  Po připojení projde MQB jednotky a otevřenou oblast načte automaticky
                 </span>
               </span>
             </label>
@@ -146,6 +159,41 @@ export function OverviewPanel({
               aria-label="Automaticky načíst data po otevření oblasti"
             />
           </div>
+
+          {profile === "vwMqb" ? (
+            <div className="space-y-2 rounded-lg border bg-muted/10 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-medium">Kompletní scan vozidla</p>
+                  <p className="mt-0.5 text-[10px] text-muted-foreground">
+                    Identifikace 41 očekávaných tras a seznam potvrzených DTC
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={!connected || fullScanRunning}
+                  onClick={() => void onScanAll()}
+                >
+                  {fullScanRunning ? (
+                    <LoaderCircle className="animate-spin" aria-hidden="true" />
+                  ) : (
+                    <ScanSearch aria-hidden="true" />
+                  )}
+                  {fullScanRunning
+                    ? `${scanProgress.completed}/${scanProgress.total}`
+                    : "Skenovat vše"}
+                </Button>
+              </div>
+              {fullScanRunning ? (
+                <Progress
+                  value={(scanProgress.completed / scanProgress.total) * 100}
+                  aria-label={`Scan vozidla ${scanProgress.completed} z ${scanProgress.total} oblastí`}
+                />
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <OverviewMetric

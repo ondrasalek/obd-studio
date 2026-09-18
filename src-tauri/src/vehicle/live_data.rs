@@ -11,6 +11,9 @@ pub enum LiveDataGroup {
     Injectors,
     Dpf,
     Turbo,
+    Electrical,
+    Emissions,
+    Fuel,
 }
 
 impl LiveDataGroup {
@@ -20,6 +23,9 @@ impl LiveDataGroup {
             Self::Injectors => "Vstřikování",
             Self::Dpf => "Filtr pevných částic",
             Self::Turbo => "Přeplňování",
+            Self::Electrical => "Elektrická síť",
+            Self::Emissions => "Emise a směs",
+            Self::Fuel => "Palivová soustava",
         }
     }
 }
@@ -394,6 +400,7 @@ pub(crate) fn signal_definitions(group: LiveDataGroup) -> &'static [SignalDefini
         LiveDataGroup::Injectors => INJECTOR_SIGNALS,
         LiveDataGroup::Dpf => DPF_SIGNALS,
         LiveDataGroup::Turbo => TURBO_SIGNALS,
+        LiveDataGroup::Electrical | LiveDataGroup::Emissions | LiveDataGroup::Fuel => &[],
     }
 }
 
@@ -476,7 +483,7 @@ impl SignalDefinition {
     }
 }
 
-fn assess_signal(key: &str, value: f64) -> LiveDataAssessment {
+pub(crate) fn assess_signal(key: &str, value: f64) -> LiveDataAssessment {
     match key {
         "engineRpm" => assess_engine_rpm(value),
         "coolantTemperature" => assess_coolant_temperature(value),
@@ -506,6 +513,38 @@ fn assess_signal(key: &str, value: f64) -> LiveDataAssessment {
         "boostPressureActual" | "boostPressureSpecified" | "boostPressure" => contextual(
             "Vyžaduje porovnání",
             "Plnicí tlak je potřeba hodnotit při zatížení společně s požadovanou hodnotou.",
+        ),
+        "batteryVoltage" | "alternatorVoltage" => assess_control_module_voltage(value),
+        "fuelLevel" => {
+            if value < 10.0 {
+                attention(
+                    "Nízká hladina paliva",
+                    "Doplňte palivo; jízda s velmi nízkou hladinou může omezit některé diagnostické testy.",
+                )
+            } else {
+                normal("Hladina paliva je dostatečná")
+            }
+        }
+        "shortFuelTrim" | "longFuelTrim" => {
+            let deviation = value.abs();
+            if deviation <= 10.0 {
+                normal("Korekce směsi je v obvyklém rozsahu")
+            } else if deviation <= 20.0 {
+                attention(
+                    "Zvýšená korekce směsi",
+                    "Ověřte netěsnosti sání, tlak paliva a stav lambda regulace.",
+                )
+            } else {
+                critical(
+                    "Výrazná korekce směsi",
+                    "Hodnota vyžaduje diagnostiku palivové a sací soustavy.",
+                )
+            }
+        }
+        "vehicleSpeed" | "engineLoad" | "throttlePosition" | "fuelRate"
+        | "fuelRailPressure" | "lambdaEquivalence" => contextual(
+            "Vyžaduje provozní kontext",
+            "Hodnota závisí na jízdním režimu, zatížení a typu motoru.",
         ),
         _ => contextual(
             "Informativní hodnota",

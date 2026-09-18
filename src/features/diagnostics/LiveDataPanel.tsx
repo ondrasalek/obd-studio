@@ -8,6 +8,8 @@ import {
   Info,
   LoaderCircle,
   OctagonAlert,
+  Pause,
+  Radio,
   RefreshCw,
   ShieldCheck,
   TriangleAlert,
@@ -36,6 +38,8 @@ interface LiveDataPanelProps {
   busy: boolean;
   loading: boolean;
   snapshot?: LiveDataSnapshot;
+  live: boolean;
+  onLiveChange: (enabled: boolean) => void;
   onRefresh: (group: LiveDataGroup) => Promise<void>;
 }
 
@@ -92,13 +96,14 @@ export function LiveDataPanel({
   busy,
   loading,
   snapshot,
+  live,
+  onLiveChange,
   onRefresh,
 }: LiveDataPanelProps) {
-  const profileReady = profile === "vwMqb";
-  const canRead = connected && profileReady && !busy;
+  const canRead = connected && !busy;
   const availableCount =
     snapshot?.values.filter(
-      (signal) => signal.status === "available" && signal.value != null,
+      (signal) => signal.status === "available",
     ).length ?? 0;
 
   return (
@@ -122,7 +127,9 @@ export function LiveDataPanel({
               ) : null}
             </div>
             <div className="mt-1 flex items-center gap-2 text-[10px] text-muted-foreground">
-              <span>Motorová ECU</span>
+              <span>
+                {profile === "vwMqb" ? "Motorová ECU · MQB" : "Motorová ECU · OBD-II"}
+              </span>
               <Badge variant="outline" className="h-5 font-mono text-[10px]">
                 TX 0x7E0
               </Badge>
@@ -142,6 +149,16 @@ export function LiveDataPanel({
               {availableCount}/{snapshot.values.length}
             </div>
           ) : null}
+          <Button
+            type="button"
+            variant={live ? "secondary" : "outline"}
+            disabled={!connected || (busy && !live)}
+            onClick={() => onLiveChange(!live)}
+            aria-pressed={live}
+          >
+            {live ? <Pause aria-hidden="true" /> : <Radio aria-hidden="true" />}
+            {live ? "Zastavit" : "Živě"}
+          </Button>
           <Button
             type="button"
             disabled={!canRead}
@@ -165,25 +182,25 @@ export function LiveDataPanel({
             title="Nejprve připojte vozidlo"
             description="Vyberte sériový port a připojte adaptér. Jednotlivé diagnostické oblasti lze procházet i offline."
           />
-        ) : !profileReady ? (
-          <UnavailableState
-            icon={ShieldCheck}
-            title="Je vyžadován profil Volkswagen Group MQB"
-            description="Odpojte adaptér a přepněte diagnostický profil na MQB · UDS. Univerzální profil používá pouze legislativní OBD-II data."
-          />
         ) : loading ? (
           <LiveDataSkeleton />
         ) : snapshot ? (
-          <LiveDataResults snapshot={snapshot} />
+          <LiveDataResults snapshot={snapshot} profile={profile} />
         ) : (
-          <EmptyLiveData title={title} />
+          <EmptyLiveData title={title} profile={profile} />
         )}
       </div>
     </div>
   );
 }
 
-function LiveDataResults({ snapshot }: { snapshot: LiveDataSnapshot }) {
+function LiveDataResults({
+  snapshot,
+  profile,
+}: {
+  snapshot: LiveDataSnapshot;
+  profile: DiagnosticProfile;
+}) {
   const hasNegativeSoot = snapshot.values.some(
     (signal) => signal.key === "dpfSootMeasured" && (signal.value ?? 0) < 0,
   );
@@ -192,10 +209,13 @@ function LiveDataResults({ snapshot }: { snapshot: LiveDataSnapshot }) {
     <div className="space-y-3">
       <Alert className="border-0 bg-muted/55">
         <Info aria-hidden="true" />
-        <AlertTitle>Data aktivního MQB profilu</AlertTitle>
+        <AlertTitle>
+          {profile === "vwMqb" ? "Data aktivního MQB profilu" : "Standardní OBD-II data"}
+        </AlertTitle>
         <AlertDescription>
-          Význam DID je nutné ověřit proti variantě řídicí jednotky. Stav zahrnuje
-          profilové meze i informaci, zda ECU danou hodnotu podporuje.
+          {profile === "vwMqb"
+            ? "Význam výrobce-specifických DID je navázán na ověřenou variantu ECU; ostatní hodnoty používají legislativní OBD-II."
+            : "Zobrazeny jsou pouze standardní PID, které aktivní vozidlo skutečně podporuje. Proprietární komfortní data tento profil neodhaduje."}
         </AlertDescription>
       </Alert>
 
@@ -229,8 +249,9 @@ function LiveDataResults({ snapshot }: { snapshot: LiveDataSnapshot }) {
 }
 
 function DiagnosticSignalRow({ signal }: { signal: LiveDataValue }) {
-  const available = signal.status === "available" && signal.value != null;
-  const assessment: LiveDataAssessment = available
+  const supported = signal.status === "available";
+  const hasNumericValue = supported && signal.value != null;
+  const assessment: LiveDataAssessment = supported
     ? signal.assessment
     : {
         level: "unknown",
@@ -260,11 +281,15 @@ function DiagnosticSignalRow({ signal }: { signal: LiveDataValue }) {
             <AssessmentBadge assessment={assessment} />
           </div>
           <p className="mt-1.5 max-w-2xl text-[11px] leading-4 text-muted-foreground">
-            {available ? assessment.detail : signal.detail ?? assessment.detail}
+            {supported ? assessment.detail : signal.detail ?? assessment.detail}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 font-mono text-[10px] text-muted-foreground/65">
-          <span>0x{signal.did}</span>
+          <span>
+            {signal.did.startsWith("01")
+              ? `PID 0x${signal.did.slice(2)}`
+              : `DID 0x${signal.did}`}
+          </span>
           <span aria-hidden="true">·</span>
           <span>{formatRawData(signal)}</span>
         </div>
@@ -272,11 +297,11 @@ function DiagnosticSignalRow({ signal }: { signal: LiveDataValue }) {
 
       <div className="flex min-w-40 flex-col items-end justify-between text-right">
         <span className="font-mono text-[10px] text-muted-foreground">
-          {available ? "načteno" : "bez hodnoty"}
+          {hasNumericValue ? "načteno" : supported ? "syrová data" : "bez hodnoty"}
         </span>
         <p className="flex items-baseline justify-end gap-2 font-mono">
           <span className="text-2xl font-semibold tracking-tight tabular-nums">
-            {available ? formatSignalValue(signal) : "—"}
+            {hasNumericValue ? formatSignalValue(signal) : supported ? "RAW" : "—"}
           </span>
           <span className="text-xs text-muted-foreground">{signal.unit}</span>
         </p>
@@ -321,7 +346,13 @@ function UnavailableState({
   );
 }
 
-function EmptyLiveData({ title }: { title: string }) {
+function EmptyLiveData({
+  title,
+  profile,
+}: {
+  title: string;
+  profile: DiagnosticProfile;
+}) {
   return (
     <div className="flex min-h-80 flex-col items-center justify-center px-6 text-center">
       <div className="flex size-12 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-primary">
@@ -329,8 +360,9 @@ function EmptyLiveData({ title }: { title: string }) {
       </div>
       <h3 className="mt-4 text-sm font-medium">{title} je připraven ke čtení</h3>
       <p className="mt-1 max-w-md text-xs leading-5 text-muted-foreground">
-        Načtení odešle pouze UDS ReadDataByIdentifier (0x22). Nepodporované
-        hodnoty budou označeny bez přerušení celé diagnostiky.
+        {profile === "vwMqb"
+          ? "Načtení používá ověřené UDS DID nebo standardní OBD-II PID. Nepodporované hodnoty nepřeruší celou skupinu."
+          : "Načtení odešle pouze standardní OBD-II Mode 01 dotazy. Nepodporované PID budou označeny bez odhadování hodnot."}
       </p>
     </div>
   );
@@ -378,7 +410,9 @@ function formatRawData(signal: LiveDataValue): string {
   }
 
   const normalized = signal.rawResponse.toUpperCase();
-  const prefix = `62${signal.did.toUpperCase()}`;
+  const prefix = signal.did.startsWith("01")
+    ? `41${signal.did.slice(2).toUpperCase()}`
+    : `62${signal.did.toUpperCase()}`;
   const data = normalized.startsWith(prefix)
     ? normalized.slice(prefix.length)
     : normalized;

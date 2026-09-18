@@ -3,7 +3,9 @@ use std::collections::HashSet;
 
 use crate::error::{AppError, AppResult};
 
-pub(crate) const CONFIRMED_DTC_COUNT_REQUEST: &str = "190108";
+/// Seznam potvrzených DTC. Subfunkce 0x02 je na MQB spolehlivější než
+/// 0x01 (pouhý počet), kterou některé jednotky odmítají nebo zkracují.
+pub(crate) const CONFIRMED_DTC_LIST_REQUEST: &str = "190208";
 pub(crate) const MAX_DID_PROBES: usize = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -91,7 +93,19 @@ pub struct ControlUnitInfo {
     pub part_number: Option<String>,
     pub software_version: Option<String>,
     pub dtc_count: Option<u16>,
+    pub dtcs: Vec<DiagnosticTroubleCode>,
     pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticTroubleCode {
+    pub code: String,
+    pub raw: String,
+    pub status: u8,
+    pub failure_type: u8,
+    pub confirmed: bool,
+    pub active: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -405,20 +419,53 @@ pub(crate) fn decode_ascii_identifier(payload_hex: &str, did: u16) -> Option<Str
     (!value.is_empty()).then_some(value)
 }
 
-pub(crate) fn decode_dtc_count(payload_hex: &str) -> Option<u16> {
-    let data = payload_hex.strip_prefix("5901")?;
-    if data.len() < 8 || !data.chars().all(|character| character.is_ascii_hexdigit()) {
+pub(crate) fn decode_dtc_list(payload_hex: &str) -> Option<Vec<DiagnosticTroubleCode>> {
+    let data = payload_hex.strip_prefix("5902")?;
+    // První byte je maska podporovaných stavů, potom následují čtveřice
+    // <3 B DTC><1 B status>. Samotná maska znamená platný prázdný seznam.
+    if data.len() < 2 || !data.len().saturating_sub(2).is_multiple_of(8) {
         return None;
     }
-    u16::from_str_radix(&data[4..8], 16).ok()
+    if !data.chars().all(|character| character.is_ascii_hexdigit()) {
+        return None;
+    }
+
+    let bytes = (2..data.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(&data[index..index + 2], 16).ok())
+        .collect::<Option<Vec<_>>>()?;
+    const SYSTEMS: [char; 4] = ['P', 'C', 'B', 'U'];
+
+    Some(
+        bytes
+            .chunks_exact(4)
+            .map(|entry| {
+                let code = format!(
+                    "{}{}{:X}{:02X}",
+                    SYSTEMS[(entry[0] >> 6) as usize],
+                    (entry[0] >> 4) & 0x03,
+                    entry[0] & 0x0F,
+                    entry[1]
+                );
+                DiagnosticTroubleCode {
+                    code,
+                    raw: format!("{:02X} {:02X} {:02X}", entry[0], entry[1], entry[2]),
+                    status: entry[3],
+                    failure_type: entry[2],
+                    confirmed: entry[3] & 0x08 != 0,
+                    active: entry[3] & 0x01 != 0,
+                }
+            })
+            .collect(),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        control_unit_definitions, decode_ascii_identifier, decode_dtc_count, extract_did_data,
+        control_unit_definitions, decode_ascii_identifier, decode_dtc_list, extract_did_data,
         find_control_unit_definition, validate_probe_dids, ControlUnitArea,
-        CONFIRMED_DTC_COUNT_REQUEST, MAX_DID_PROBES,
+        CONFIRMED_DTC_LIST_REQUEST, MAX_DID_PROBES,
     };
     use std::collections::HashSet;
 
@@ -475,14 +522,19 @@ mod tests {
     }
 
     #[test]
-    fn decodes_number_of_dtcs_by_status_mask() {
-        assert_eq!(decode_dtc_count("5901FF010003"), Some(3));
-        assert_eq!(decode_dtc_count("5902FF010003"), None);
+    fn decodes_confirmed_dtc_list() {
+        let dtcs = decode_dtc_list("590219FFFF3A08").unwrap();
+        assert_eq!(dtcs.len(), 1);
+        assert_eq!(dtcs[0].code, "U3FFF");
+        assert_eq!(dtcs[0].failure_type, 0x3A);
+        assert!(dtcs[0].confirmed);
+        assert!(!dtcs[0].active);
+        assert_eq!(decode_dtc_list("590299"), Some(Vec::new()));
     }
 
     #[test]
     fn confirmed_dtc_scan_uses_confirmed_status_bit_only() {
-        assert_eq!(CONFIRMED_DTC_COUNT_REQUEST, "190108");
+        assert_eq!(CONFIRMED_DTC_LIST_REQUEST, "190208");
     }
 
     #[test]

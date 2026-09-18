@@ -1,7 +1,10 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  Activity,
   Armchair,
+  BatteryCharging,
   CarFront,
+  Code2,
   Disc3,
   DoorOpen,
   Fan,
@@ -15,15 +18,20 @@ import {
   Settings2,
   SlidersHorizontal,
   Snowflake,
+  Wrench,
 } from "lucide-react";
 import type { ControlUnitArea, LiveDataGroup } from "@/types/diagnostics";
 
 export type DiagnosticSectionId =
   | "overview"
+  | "diagnostics"
   | "engine"
   | "injectors"
   | "dpf"
   | "turbo"
+  | "electrical"
+  | "emissions"
+  | "fuel"
   | "transmission"
   | "drivingModes"
   | "brakes"
@@ -33,7 +41,10 @@ export type DiagnosticSectionId =
   | "lighting"
   | "exterior"
   | "climate"
-  | "infotainment";
+  | "infotainment"
+  | "performance"
+  | "coding"
+  | "service";
 
 export interface DiagnosticSection {
   id: DiagnosticSectionId;
@@ -62,6 +73,21 @@ export const DIAGNOSTIC_SECTION_GROUPS: DiagnosticSectionGroup[] = [
         icon: LayoutDashboard,
         availability: "core",
       },
+      {
+        id: "diagnostics",
+        title: "Čtení a měření",
+        description: "Přehled dostupných diagnostických funkcí",
+        icon: Activity,
+        availability: "core",
+      },
+      {
+        id: "electrical",
+        title: "Elektrická síť",
+        description: "Napětí ECU a orientační stav dobíjení",
+        icon: BatteryCharging,
+        liveGroup: "electrical",
+        availability: "core",
+      },
     ],
   },
   {
@@ -73,23 +99,23 @@ export const DIAGNOSTIC_SECTION_GROUPS: DiagnosticSectionGroup[] = [
         description: "Provozní hodnoty motorové ECU",
         icon: Gauge,
         liveGroup: "engine",
-        availability: "profiled",
+        availability: "core",
       },
       {
         id: "injectors",
         title: "Vstřikování",
-        description: "Korekce dávky jednotlivých válců",
+        description: "Palivový tlak, směs a profilové korekce válců",
         icon: Fuel,
         liveGroup: "injectors",
-        availability: "profiled",
+        availability: "core",
       },
       {
         id: "dpf",
         title: "DPF",
-        description: "Saze, popel, tlak a regenerace",
+        description: "Teploty a tlak; profilově saze, popel a regenerace",
         icon: Filter,
         liveGroup: "dpf",
-        availability: "profiled",
+        availability: "core",
       },
       {
         id: "turbo",
@@ -97,7 +123,23 @@ export const DIAGNOSTIC_SECTION_GROUPS: DiagnosticSectionGroup[] = [
         description: "Plnicí tlak a teploty",
         icon: Fan,
         liveGroup: "turbo",
-        availability: "profiled",
+        availability: "core",
+      },
+      {
+        id: "fuel",
+        title: "Palivová soustava",
+        description: "Hladina, tlak v liště a průtok paliva",
+        icon: Fuel,
+        liveGroup: "fuel",
+        availability: "core",
+      },
+      {
+        id: "emissions",
+        title: "Emise a směs",
+        description: "Korekce směsi, lambda a NOx",
+        icon: Activity,
+        liveGroup: "emissions",
+        availability: "core",
       },
       {
         id: "transmission",
@@ -247,6 +289,32 @@ export const DIAGNOSTIC_SECTION_GROUPS: DiagnosticSectionGroup[] = [
           "Zvukový systém",
           "Telematika a telefonní rozhraní",
         ],
+      },
+    ],
+  },
+  {
+    label: "Pokročilé funkce",
+    sections: [
+      {
+        id: "performance",
+        title: "Výkonové testy",
+        description: "0–100 km/h, 1/4 míle a grafy",
+        icon: Gauge,
+        availability: "planned",
+      },
+      {
+        id: "coding",
+        title: "Kódování",
+        description: "Komfort, světla, okna a přístroje",
+        icon: Code2,
+        availability: "planned",
+      },
+      {
+        id: "service",
+        title: "Servisní funkce",
+        description: "DTC, intervaly, brzdy a adaptace",
+        icon: Wrench,
+        availability: "utility",
       },
     ],
   },

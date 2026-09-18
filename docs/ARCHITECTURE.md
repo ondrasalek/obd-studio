@@ -13,7 +13,7 @@
 
 ```text
 React action + selected profile
-    │ invoke("send_standard_obd_query" | "read_live_data" | "scan_control_units" | "probe_dids")
+    │ invoke("send_standard_obd_query" | "read_live_data" | "scan_control_units" | "probe_dids" | "clear_emission_dtcs")
     ▼
 Tauri command
     │ typed query
@@ -21,7 +21,7 @@ Tauri command
 DiagnosticHandle ── mpsc ──► SerialWorker thread
                                 │
                                 ├─ enforce active profile
-                                ├─ validate read-only allowlist
+                                ├─ validate profile and typed operation policy
                                 ├─ OBD-II payload or targeted STPX request
                                 └─ wait for complete `>` prompt
                                          │
@@ -48,7 +48,7 @@ Implementuje request/response terminál OBDLinku. Každý příkaz končí `CR`,
 
 ### `protocol::obd2`
 
-Mapuje pojmenované čtecí akce na pevnou allowlist standardních payloadů. Parser podporuje více odpovídajících ECU, segmentovaný VIN, dekódování Mode 03 DTC a zachovává surovou odpověď pro audit. Frontend neposílá libovolný hex payload.
+Mapuje pojmenované akce na pevnou allowlist standardních payloadů. Parser podporuje více odpovídajících ECU, segmentovaný VIN, dekódování Mode 03 DTC a zachovává surovou odpověď pro audit. Standardní live data používají samostatné deklarativní definice PID a dekodéry. Frontend neposílá libovolný hex payload.
 
 ### `protocol::uds`
 
@@ -58,11 +58,11 @@ Normalizuje hex, kontroluje 11bit CAN ID, timeout a povolenou service. Parser ro
 
 Obsahuje identitu diagnostického profilu, předvolby ECU, katalog očekávaných MQB jednotek a deklarativní definice živých signálů včetně DID, jednotky, dekodéru a orientačního hodnocení. Dávkové čtení jedné skupiny vybere fyzický cíl pouze jednou; nepodporovaný DID označí samostatně a nepřeruší kvůli němu ostatní hodnoty. Hodnocení vzniká v profilové vrstvě backendu, aby bylo testovatelné a později verzovatelné podle varianty ECU; UI pouze vykresluje vrácený stav a vysvětlení.
 
-`scan_control_units` přijímá typovanou oblast, nikoli uživatelský CAN rozsah. Worker sekvenčně zkouší pouze deklarované fyzické trasy, čte číslo dílu (`F187`), verzi software (`F189`) a počet potvrzených DTC podle status masky `0x08` (`19 01 08`). Jednotlivé timeouty jsou izolované, takže nepřítomná volitelná ECU nepřeruší celou oblast. Výsledek rozlišuje odpověď ECU, běžnou nepřítomnost/neodpověď a transportní chybu.
+`scan_control_units` přijímá typovanou oblast, nikoli uživatelský CAN rozsah. Worker sekvenčně zkouší pouze deklarované fyzické trasy, čte číslo dílu (`F187`), verzi software (`F189`) a potvrzené DTC podle status masky `0x08` (`19 02 08`). Z odpovědi `59 02` vrací kód, status, failure type i raw záznam. Jednotlivé timeouty jsou izolované, takže nepřítomná volitelná ECU nepřeruší celou oblast. Výsledek rozlišuje odpověď ECU, běžnou nepřítomnost/neodpověď a transportní chybu.
 
 `probe_dids` je vývojová read-only cesta pro mapování výrobce-specifických dat. Přijímá oblast, klíč jednotky a maximálně 16 čísel DID. Backend ověří, že jednotka patří do katalogu dané oblasti, odstraní duplicity a každý požadavek sestaví interně jako `0x22 + DID`. Volající nemůže dodat CAN adresu ani payload. Odpověď rozlišuje čitelný DID, běžně nepodporovaný DID (`NRC 0x11/0x12/0x31`), jiné odmítnutí ECU a transportní chybu. Čitelná raw data mají informační stav, nikoli hodnocení bezvadnosti.
 
-Frontend může po prvním otevření diagnostické oblasti v aktuální relaci automaticky zavolat odpovídající read command. Klíč oblasti se drží v session-scoped sadě, aby React Strict Mode ani opakované renderování nevytvořily dvojitý request. Nejde o časovaný polling; uživatel může automatiku vypnout a každý pohled ručně obnovit.
+Frontend může po připojení MQB profilu sekvenčně načíst všechny diagnostické oblasti. Worker všechny sériové operace nadále serializuje a UI ukazuje průběh. U živých hodnot je časovač naplánovaný až po dokončení předchozího čtení, takže se požadavky nepřekrývají. Uživatel může automatiku i živé obnovování vypnout a každý pohled ručně obnovit.
 
 ## Bezpečnostní hranice univerzálního profilu
 
@@ -71,8 +71,9 @@ Frontend může po prvním otevření diagnostické oblasti v aktuální relaci 
 - Mode `01`, PID `00` — dostupné current-data PID
 - Mode `09`, PID `02` — VIN, pokud jej vozidlo podporuje
 - Mode `03` — uložené emisní DTC
+- Mode `01` — deklarované current-data PID používané jednotlivými live skupinami
 
-Mazání DTC přes Mode `04`, aktivní testy a výrobce-specifické příkazy nejsou součástí profilu.
+Jedinou změnovou operací je samostatný command `clear_emission_dtcs`. Neakceptuje payload a vždy sestaví přesně Mode `04`. Před odesláním vyžaduje přesnou potvrzovací frázi, univerzální profil, napětí alespoň 12,0 V a úspěšně dekódované otáčky pod 100 rpm. Tímto příkazem nelze mazat závady ABS, airbagů ani jiných výrobce-specifických ECU. Aktivní testy a výrobce-specifické příkazy nejsou součástí profilu.
 
 ## Bezpečnostní hranice MQB profilu
 
@@ -82,7 +83,7 @@ Generický IPC command `send_uds_payload` není neomezený raw socket. Všechny 
 - `0x22` ReadDataByIdentifier
 - `0x3E` TesterPresent
 
-Aktuální interní scany používají konkrétní podfunkci `0x19 01 08`; maska `0x08` počítá pouze potvrzené DTC. Nejde o mazání závad ani akční test.
+Aktuální interní scany používají konkrétní podfunkci `0x19 02 08`; maska `0x08` vrací potvrzené DTC. Nejde o mazání závad ani akční test.
 
 Průzkum DID není obecný raw UDS command: cíl pochází z profilového katalogu, počet dotazů je omezený a služba je pevně `0x22`. Úplný scan prostoru `0x0000–0xFFFF` aplikace neposkytuje.
 

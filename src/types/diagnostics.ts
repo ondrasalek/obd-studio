@@ -6,7 +6,14 @@ export type ConnectionState =
 
 export type DiagnosticProfile = "genericObd2" | "vwMqb";
 
-export type LiveDataGroup = "engine" | "injectors" | "dpf" | "turbo";
+export type LiveDataGroup =
+  | "engine"
+  | "injectors"
+  | "dpf"
+  | "turbo"
+  | "electrical"
+  | "emissions"
+  | "fuel";
 
 export type ControlUnitArea =
   | "transmission"
@@ -146,7 +153,17 @@ export interface ControlUnitInfo {
   partNumber: string | null;
   softwareVersion: string | null;
   dtcCount: number | null;
+  dtcs: DiagnosticTroubleCode[];
   detail: string | null;
+}
+
+export interface DiagnosticTroubleCode {
+  code: string;
+  raw: string;
+  status: number;
+  failureType: number;
+  confirmed: boolean;
+  active: boolean;
 }
 
 export interface ControlUnitAreaSnapshot {
@@ -178,4 +195,27 @@ export interface DidProbeSnapshot {
 export interface CommandError {
   code: string;
   message: string;
+}
+
+export type CapabilityKind = "read" | "performance" | "coding" | "service";
+export type CapabilityState = "available" | "profileRequired" | "planned";
+export type CapabilityRisk = "readOnly" | "low" | "medium" | "high";
+
+export interface VehicleCapability {
+  id: string;
+  title: string;
+  description: string;
+  kind: CapabilityKind;
+  state: CapabilityState;
+  risk: CapabilityRisk;
+  targetSection: string | null;
+  requirements: string[];
+}
+
+export interface ServiceOperationResult {
+  operationId: string;
+  completed: boolean;
+  voltage: number;
+  detail: string;
+  rawResponse: string;
 }

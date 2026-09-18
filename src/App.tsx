@@ -4,6 +4,7 @@ import { DiagnosticStatusBar } from "@/app/DiagnosticStatusBar";
 import { ConnectionPanel } from "@/features/connection/ConnectionPanel";
 import { DiagnosticConsole } from "@/features/console/DiagnosticConsole";
 import { ControlUnitPanel } from "@/features/diagnostics/ControlUnitPanel";
+import { CapabilityCenter } from "@/features/diagnostics/CapabilityCenter";
 import { DiagnosticNavigation } from "@/features/diagnostics/DiagnosticNavigation";
 import { LiveDataPanel } from "@/features/diagnostics/LiveDataPanel";
 import { OverviewPanel } from "@/features/diagnostics/OverviewPanel";
@@ -13,12 +14,14 @@ import {
   type DiagnosticSectionId,
 } from "@/features/diagnostics/catalog";
 import { useDiagnosticSession } from "@/hooks/useDiagnosticSession";
+import type { LiveDataGroup } from "@/types/diagnostics";
 
 function App() {
   const session = useDiagnosticSession();
   const [selectedSection, setSelectedSection] =
     useState<DiagnosticSectionId>("overview");
   const [autoReadEnabled, setAutoReadEnabled] = useState(true);
+  const [liveGroup, setLiveGroup] = useState<LiveDataGroup>();
   const automaticReads = useRef(new Set<string>());
   const section = getDiagnosticSection(selectedSection);
   const connected = session.connectionState === "busReady";
@@ -32,6 +35,7 @@ function App() {
   useEffect(() => {
     if (!connected) {
       automaticReads.current.clear();
+      setLiveGroup(undefined);
     }
   }, [connected]);
 
@@ -40,6 +44,29 @@ function App() {
       !autoReadEnabled ||
       !connected ||
       session.selectedProfile !== "vwMqb" ||
+      session.fullScanRunning ||
+      Object.keys(session.controlUnitSnapshots).length > 0
+    ) {
+      return;
+    }
+    const requestKey = "units:full-vehicle-scan";
+    if (!automaticReads.current.has(requestKey)) {
+      automaticReads.current.add(requestKey);
+      void session.scanAllControlUnits();
+    }
+  }, [
+    autoReadEnabled,
+    connected,
+    session.controlUnitSnapshots,
+    session.fullScanRunning,
+    session.scanAllControlUnits,
+    session.selectedProfile,
+  ]);
+
+  useEffect(() => {
+    if (
+      !autoReadEnabled ||
+      !connected ||
       session.busy
     ) {
       return;
@@ -55,6 +82,7 @@ function App() {
     }
 
     if (
+      session.selectedProfile === "vwMqb" &&
       section.controlUnitArea &&
       !session.controlUnitSnapshots[section.controlUnitArea]
     ) {
@@ -77,11 +105,33 @@ function App() {
     session.selectedProfile,
   ]);
 
+  useEffect(() => {
+    if (!liveGroup || !connected) return;
+
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      await session.refreshLiveData(liveGroup);
+      if (!cancelled) timeoutId = setTimeout(() => void poll(), 1_000);
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [connected, liveGroup, session.refreshLiveData]);
+
   const handleAutoReadChange = (enabled: boolean) => {
     if (enabled) {
       automaticReads.current.clear();
     }
     setAutoReadEnabled(enabled);
+  };
+
+  const handleSelectSection = (id: DiagnosticSectionId) => {
+    const next = getDiagnosticSection(id);
+    if (next.liveGroup !== liveGroup) setLiveGroup(undefined);
+    setSelectedSection(id);
   };
 
   return (
@@ -111,7 +161,7 @@ function App() {
               connected={connected}
               snapshots={session.liveSnapshots}
               controlUnitSnapshots={session.controlUnitSnapshots}
-              onSelect={setSelectedSection}
+              onSelect={handleSelectSection}
             />
           </aside>
 
@@ -132,8 +182,11 @@ function App() {
                     snapshots={session.liveSnapshots}
                     controlUnitSnapshots={session.controlUnitSnapshots}
                     autoReadEnabled={autoReadEnabled}
+                    fullScanRunning={session.fullScanRunning}
+                    scanProgress={session.scanProgress}
                     onAutoReadEnabledChange={handleAutoReadChange}
-                    onSelect={setSelectedSection}
+                    onScanAll={session.scanAllControlUnits}
+                    onSelect={handleSelectSection}
                   />
                   <QuickActions
                     profile={session.selectedProfile}
@@ -156,6 +209,10 @@ function App() {
                   busy={session.busy}
                   loading={session.loadingGroup === section.liveGroup}
                   snapshot={selectedLiveSnapshot}
+                  live={liveGroup === section.liveGroup}
+                  onLiveChange={(enabled) =>
+                    setLiveGroup(enabled ? section.liveGroup : undefined)
+                  }
                   onRefresh={session.refreshLiveData}
                 />
               ) : section.controlUnitArea ? (
@@ -175,6 +232,19 @@ function App() {
                   onScan={session.scanControlUnits}
                   onProbeDids={session.probeDids}
                 />
+              ) : section.id === "diagnostics" || section.id === "performance" || section.id === "coding" || section.id === "service" ? (
+                <div className="p-4">
+                  <CapabilityCenter
+                    kind={section.id === "diagnostics" ? "read" : section.id}
+                    capabilities={session.capabilities}
+                    connected={connected}
+                    profile={session.selectedProfile}
+                    onNavigate={handleSelectSection}
+                    serviceBusy={session.serviceBusy}
+                    serviceResult={session.serviceOperation}
+                    onClearEmissionDtcs={session.clearEmissionDtcs}
+                  />
+                </div>
               ) : null}
             </section>
 

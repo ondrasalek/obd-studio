@@ -9,8 +9,9 @@ mod vehicle;
 
 use app_state::AppState;
 use commands::{
-    connect_port, disconnect_port, list_serial_ports, probe_dids, read_central_electronics,
-    read_live_data, scan_control_units, send_standard_obd_query, send_uds_payload,
+    clear_emission_dtcs, connect_port, disconnect_port, list_serial_ports,
+    list_vehicle_capabilities, probe_dids, read_central_electronics, read_live_data,
+    scan_control_units, send_standard_obd_query, send_uds_payload,
 };
 use tauri::Manager;
 
@@ -25,6 +26,8 @@ pub fn run() {
             list_serial_ports,
             connect_port,
             disconnect_port,
+            list_vehicle_capabilities,
+            clear_emission_dtcs,
             send_standard_obd_query,
             send_uds_payload,
             read_live_data,

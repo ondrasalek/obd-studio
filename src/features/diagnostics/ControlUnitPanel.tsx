@@ -413,13 +413,30 @@ function DtcStatus({ unit }: { unit: ControlUnitInfo }) {
   }
 
   return (
-    <Badge
-      variant="outline"
-      className="border-amber-500/25 bg-amber-500/10 text-[10px] text-amber-300"
-    >
-      <TriangleAlert aria-hidden="true" />
-      {unit.dtcCount} potvrzených DTC
-    </Badge>
+    <div className="space-y-1.5">
+      <Badge
+        variant="outline"
+        className="border-amber-500/25 bg-amber-500/10 text-[10px] text-amber-300"
+      >
+        <TriangleAlert aria-hidden="true" />
+        {unit.dtcCount} potvrzených DTC
+      </Badge>
+      {(unit.dtcs ?? []).map((dtc) => (
+        <div
+          key={`${dtc.code}-${dtc.raw}-${dtc.status}`}
+          className="flex items-center gap-2 font-mono text-[10px]"
+          title={`Raw ${dtc.raw} · status 0x${dtc.status.toString(16).toUpperCase().padStart(2, "0")} · typ 0x${dtc.failureType.toString(16).toUpperCase().padStart(2, "0")}`}
+        >
+          <span className="font-semibold text-amber-300">{dtc.code}</span>
+          <span className="text-muted-foreground">{dtc.raw}</span>
+          {dtc.active ? (
+            <span className="text-destructive">aktivní</span>
+          ) : (
+            <span className="text-muted-foreground">uložená</span>
+          )}
+        </div>
+      ))}
+    </div>
   );
 }
 

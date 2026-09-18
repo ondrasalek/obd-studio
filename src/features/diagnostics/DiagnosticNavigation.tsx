@@ -106,7 +106,10 @@ function NavigationItem({
   onSelect: (section: DiagnosticSectionId) => void;
 }) {
   const Icon = section.icon;
-  const profiledReady = section.availability === "profiled" && profiled;
+  const profiledReady =
+    connected &&
+    (section.availability === "core" ||
+      (section.availability === "profiled" && profiled));
 
   return (
     <Button

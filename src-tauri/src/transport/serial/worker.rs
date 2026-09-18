@@ -4,11 +4,12 @@ use crate::events::{emit_connection_state, emit_log, LogDirection, LogKind};
 use crate::protocol::obd2::{parse_standard_obd_response, StandardObdQuery, StandardObdResponse};
 use crate::protocol::uds::{parse_uds_response, UdsRequest, UdsResponse};
 use crate::vehicle::{
-    control_unit_definitions, decode_ascii_identifier, decode_dtc_count, extract_did_data,
-    find_control_unit_definition, signal_definitions, validate_probe_dids, ControlUnitArea,
-    ControlUnitAreaSnapshot, ControlUnitDefinition, ControlUnitInfo, ControlUnitScanStatus,
-    DiagnosticProfile, DidProbeSnapshot, DidProbeStatus, DidProbeValue, LiveDataGroup,
-    LiveDataSnapshot, LiveDataStatus, CONFIRMED_DTC_COUNT_REQUEST, ENGINE_RX_ID, ENGINE_TX_ID,
+    control_unit_definitions, decode_ascii_identifier, decode_dtc_list, engine_rpm_from_reply,
+    extract_did_data, find_control_unit_definition, obd_signal_definitions, signal_definitions,
+    validate_probe_dids, ControlUnitArea, ControlUnitAreaSnapshot, ControlUnitDefinition,
+    ControlUnitInfo, ControlUnitScanStatus, DiagnosticProfile, DidProbeSnapshot, DidProbeStatus,
+    DidProbeValue, LiveDataGroup, LiveDataSnapshot, LiveDataStatus, CONFIRMED_DTC_LIST_REQUEST,
+    ENGINE_RX_ID, ENGINE_TX_ID,
 };
 use serde::Serialize;
 use serialport::{DataBits, FlowControl, Parity, SerialPort, StopBits};
@@ -29,6 +30,16 @@ pub struct ConnectionInfo {
     pub protocol: String,
     pub can_bitrate: Option<u32>,
     pub bus_ready: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceOperationResult {
+    pub operation_id: &'static str,
+    pub completed: bool,
+    pub voltage: f32,
+    pub detail: String,
+    pub raw_response: String,
 }
 
 #[derive(Clone)]
@@ -128,6 +139,20 @@ impl DiagnosticHandle {
             .map_err(|_| AppError::worker_unavailable())?;
         response.await.map_err(|_| AppError::worker_unavailable())?
     }
+
+    pub async fn clear_emission_dtcs(
+        &self,
+        confirmation: String,
+    ) -> AppResult<ServiceOperationResult> {
+        let (respond_to, response) = oneshot::channel();
+        self.sender
+            .send(WorkerCommand::ClearEmissionDtcs {
+                confirmation,
+                respond_to,
+            })
+            .map_err(|_| AppError::worker_unavailable())?;
+        response.await.map_err(|_| AppError::worker_unavailable())?
+    }
 }
 
 enum WorkerCommand {
@@ -160,6 +185,10 @@ enum WorkerCommand {
         unit_key: String,
         dids: Vec<u16>,
         respond_to: oneshot::Sender<AppResult<DidProbeSnapshot>>,
+    },
+    ClearEmissionDtcs {
+        confirmation: String,
+        respond_to: oneshot::Sender<AppResult<ServiceOperationResult>>,
     },
 }
 
@@ -227,6 +256,14 @@ impl SerialWorker {
                     respond_to,
                 } => {
                     let result = self.probe_dids(area, &unit_key, dids);
+                    self.report_error(&result, false);
+                    let _ = respond_to.send(result);
+                }
+                WorkerCommand::ClearEmissionDtcs {
+                    confirmation,
+                    respond_to,
+                } => {
+                    let result = self.clear_emission_dtcs(&confirmation);
                     self.report_error(&result, false);
                     let _ = respond_to.send(result);
                 }
@@ -350,11 +387,9 @@ impl SerialWorker {
         if self.port.is_none() {
             return Err(AppError::disconnected());
         }
-        if self.profile != Some(DiagnosticProfile::VwMqb) {
-            return Err(AppError::new(
-                "PROFILE_MISMATCH",
-                "Živá data VAG vyžadují profil Volkswagen Group MQB.",
-            ));
+        let profile = self.profile.ok_or_else(AppError::disconnected)?;
+        if profile == DiagnosticProfile::GenericObd2 || signal_definitions(group).is_empty() {
+            return self.read_standard_live_data(group, profile == DiagnosticProfile::VwMqb);
         }
 
         let port = self.port.as_mut().ok_or_else(AppError::disconnected)?;
@@ -435,6 +470,114 @@ impl SerialWorker {
         })
     }
 
+    fn read_standard_live_data(
+        &mut self,
+        group: LiveDataGroup,
+        physically_addressed: bool,
+    ) -> AppResult<LiveDataSnapshot> {
+        let definitions = obd_signal_definitions(group);
+        if definitions.is_empty() {
+            return Err(AppError::new(
+                "UNSUPPORTED_GROUP",
+                "Aktivní profil pro tuto skupinu nemá žádné bezpečně definované hodnoty.",
+            ));
+        }
+
+        let port = self.port.as_mut().ok_or_else(AppError::disconnected)?;
+        let mut client = StnClient::new(port.as_mut(), &self.app);
+        if physically_addressed {
+            client.select_target(ENGINE_TX_ID, ENGINE_RX_ID)?;
+        }
+
+        let mut values = Vec::with_capacity(definitions.len());
+        for definition in definitions {
+            let reply = if physically_addressed {
+                client.send_physical_current_data_pid(ENGINE_TX_ID, definition.pid, 1_500)
+            } else {
+                client.send_standard_current_data_pid(definition.pid, 3_000)
+            };
+
+            let value = match reply {
+                Ok(reply) => definition.decode(reply),
+                Err(error) => {
+                    let unsupported = error.code == "ADAPTER_ERROR"
+                        && (error.message.contains("NO DATA")
+                            || error.message.contains("UNABLE TO CONNECT"));
+                    definition.unavailable(
+                        if unsupported {
+                            LiveDataStatus::Unsupported
+                        } else {
+                            LiveDataStatus::Error
+                        },
+                        error.message,
+                        None,
+                    )
+                }
+            };
+            values.push(value);
+        }
+
+        let available = values
+            .iter()
+            .filter(|value| matches!(value.status, LiveDataStatus::Available))
+            .count();
+        emit_log(
+            &self.app,
+            LogDirection::System,
+            LogKind::Status,
+            format!(
+                "{} · OBD-II: načteno {available}/{} hodnot.",
+                group.display_name(),
+                values.len()
+            ),
+        );
+
+        Ok(LiveDataSnapshot {
+            group,
+            ecu_name: "Motorová ECU · legislativní OBD-II".to_owned(),
+            tx_id: ENGINE_TX_ID,
+            rx_id: ENGINE_RX_ID,
+            captured_at_ms: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+            values,
+        })
+    }
+
+    fn clear_emission_dtcs(&mut self, confirmation: &str) -> AppResult<ServiceOperationResult> {
+        validate_clear_emission_dtc_request(confirmation, self.profile)?;
+
+        let port = self.port.as_mut().ok_or_else(AppError::disconnected)?;
+        let mut client = StnClient::new(port.as_mut(), &self.app);
+        let voltage = client.supply_voltage()?;
+
+        let rpm_reply = client.send_standard_current_data_pid(0x0C, 3_000)?;
+        let rpm = engine_rpm_from_reply(rpm_reply).ok_or_else(|| {
+            AppError::new(
+                "ENGINE_STATE_UNKNOWN",
+                "Nelze ověřit otáčky motoru; mazání DTC bylo z bezpečnostních důvodů zablokováno.",
+            )
+        })?;
+        validate_clear_emission_dtc_vehicle_state(voltage, rpm)?;
+
+        let reply = client.clear_emission_dtcs()?;
+        emit_log(
+            &self.app,
+            LogDirection::System,
+            LogKind::Status,
+            "Emisní OBD-II DTC byly vymazány. Readiness monitory se mohou vrátit do stavu nedokončeno.",
+        );
+        Ok(ServiceOperationResult {
+            operation_id: "clear-emission-dtcs",
+            completed: true,
+            voltage,
+            detail: "Emisní DTC byly vymazány. Proveďte nový scan a ověřte, zda se závada nevrací."
+                .to_owned(),
+            raw_response: reply.raw,
+        })
+    }
+
     fn scan_control_units(&mut self, area: ControlUnitArea) -> AppResult<ControlUnitAreaSnapshot> {
         if self.port.is_none() {
             return Err(AppError::disconnected());
@@ -511,11 +654,14 @@ impl SerialWorker {
                 match read_control_unit_request(
                     &mut client,
                     definition,
-                    CONFIRMED_DTC_COUNT_REQUEST,
+                    CONFIRMED_DTC_LIST_REQUEST,
                     dtc_request_id,
                 ) {
                     Ok(response) if response.negative_response.is_none() => {
-                        info.dtc_count = decode_dtc_count(&response.payload_hex);
+                        if let Some(dtcs) = decode_dtc_list(&response.payload_hex) {
+                            info.dtc_count = Some(dtcs.len() as u16);
+                            info.dtcs = dtcs;
+                        }
                     }
                     Err(error) if error.code == "SERIAL_ERROR" => return Err(error),
                     _ => {}
@@ -638,6 +784,41 @@ impl SerialWorker {
     }
 }
 
+fn validate_clear_emission_dtc_request(
+    confirmation: &str,
+    profile: Option<DiagnosticProfile>,
+) -> AppResult<()> {
+    if confirmation != "SMAZAT EMISNI DTC" {
+        return Err(AppError::new(
+            "CONFIRMATION_REQUIRED",
+            "Pro potvrzení napište přesně „SMAZAT EMISNI DTC“.",
+        ));
+    }
+    if profile != Some(DiagnosticProfile::GenericObd2) {
+        return Err(AppError::new(
+            "PROFILE_MISMATCH",
+            "Standardní Mode 04 je dostupný pouze v univerzálním OBD-II profilu. UDS závady jednotlivých jednotek se nemažou.",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_clear_emission_dtc_vehicle_state(voltage: f32, rpm: f64) -> AppResult<()> {
+    if voltage < 12.0 {
+        return Err(AppError::new(
+            "LOW_VOLTAGE",
+            format!("Napětí {voltage:.2} V je pod bezpečnou hranicí 12,0 V."),
+        ));
+    }
+    if rpm >= 100.0 {
+        return Err(AppError::new(
+            "ENGINE_RUNNING",
+            format!("Motor běží ({rpm:.0} rpm). Vypněte motor a ponechte zapnuté zapalování."),
+        ));
+    }
+    Ok(())
+}
+
 fn empty_control_unit_info(definition: &ControlUnitDefinition) -> ControlUnitInfo {
     ControlUnitInfo {
         key: definition.key.to_owned(),
@@ -649,6 +830,7 @@ fn empty_control_unit_info(definition: &ControlUnitDefinition) -> ControlUnitInf
         part_number: None,
         software_version: None,
         dtc_count: None,
+        dtcs: Vec::new(),
         detail: None,
     }
 }
@@ -715,5 +897,54 @@ fn did_probe_value_from_response(did: u16, response: UdsResponse) -> DidProbeVal
             raw_response: Some(response.raw_response),
             detail: "Odpověď neobsahuje očekávané echo požadovaného DID.".to_owned(),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clear_dtc_requires_exact_confirmation() {
+        let error = validate_clear_emission_dtc_request(
+            "smazat emisni dtc",
+            Some(DiagnosticProfile::GenericObd2),
+        )
+        .expect_err("lower-case confirmation must be rejected");
+
+        assert_eq!(error.code, "CONFIRMATION_REQUIRED");
+    }
+
+    #[test]
+    fn clear_dtc_is_not_available_in_mqb_profile() {
+        let error = validate_clear_emission_dtc_request(
+            "SMAZAT EMISNI DTC",
+            Some(DiagnosticProfile::VwMqb),
+        )
+        .expect_err("MQB UDS clear must remain blocked");
+
+        assert_eq!(error.code, "PROFILE_MISMATCH");
+    }
+
+    #[test]
+    fn clear_dtc_rejects_low_voltage_and_running_engine() {
+        let low_voltage = validate_clear_emission_dtc_vehicle_state(11.99, 0.0)
+            .expect_err("low voltage must be rejected");
+        assert_eq!(low_voltage.code, "LOW_VOLTAGE");
+
+        let running = validate_clear_emission_dtc_vehicle_state(12.6, 850.0)
+            .expect_err("running engine must be rejected");
+        assert_eq!(running.code, "ENGINE_RUNNING");
+    }
+
+    #[test]
+    fn clear_dtc_accepts_safe_static_conditions() {
+        validate_clear_emission_dtc_request(
+            "SMAZAT EMISNI DTC",
+            Some(DiagnosticProfile::GenericObd2),
+        )
+        .expect("valid request should pass");
+        validate_clear_emission_dtc_vehicle_state(12.5, 0.0)
+            .expect("safe static conditions should pass");
     }
 }

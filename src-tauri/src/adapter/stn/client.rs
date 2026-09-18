@@ -109,8 +109,64 @@ impl<'a> StnClient<'a> {
         )
     }
 
+    /// Typovaná interní cesta pro legislativní Mode 01.
+    ///
+    /// Volající dodává pouze PID, takže touto metodou nelze obejít read-only
+    /// hranici a poslat Mode 04 nebo výrobce-specifický zápis.
+    pub fn send_standard_current_data_pid(
+        &mut self,
+        pid: u8,
+        timeout_ms: u64,
+    ) -> AppResult<StnReply> {
+        self.transact(
+            &format!("01{pid:02X}"),
+            Duration::from_millis(timeout_ms.clamp(100, 12_000)),
+            LogKind::Obd,
+        )
+    }
+
+    /// Mode 01 fyzicky adresovaný na motorovou ECU aktivního MQB profilu.
+    pub fn send_physical_current_data_pid(
+        &mut self,
+        tx_id: u32,
+        pid: u8,
+        timeout_ms: u64,
+    ) -> AppResult<StnReply> {
+        let timeout_ms = timeout_ms.clamp(100, 10_000);
+        let command = format!("STPX h:{tx_id:03X},d:01{pid:02X},t:{timeout_ms},r:1");
+        self.transact(
+            &command,
+            Duration::from_millis(timeout_ms + 500),
+            LogKind::Obd,
+        )
+    }
+
     pub fn detected_protocol(&mut self) -> Option<String> {
         self.query_value("STPRS").ok()
+    }
+
+    pub fn supply_voltage(&mut self) -> AppResult<f32> {
+        parse_voltage(&self.query_value("STVR")?)
+            .ok_or_else(|| AppError::adapter("Adaptér nevrátil platné napětí vozidla."))
+    }
+
+    /// Pevně typovaná standardní operace Mode 04. Volající nemůže dodat
+    /// jiný payload; výrobce-specifické mazání UDS touto cestou neprojde.
+    pub fn clear_emission_dtcs(&mut self) -> AppResult<StnReply> {
+        let reply = self.transact("04", Duration::from_millis(5_000), LogKind::Obd)?;
+        let positive = reply.lines.iter().any(|line| {
+            line.chars()
+                .filter(|character| character.is_ascii_hexdigit())
+                .collect::<String>()
+                .to_ascii_uppercase()
+                .starts_with("44")
+        });
+        if !positive {
+            return Err(AppError::adapter(
+                "Vozidlo nepotvrdilo vymazání emisních DTC odpovědí Mode 44.",
+            ));
+        }
+        Ok(reply)
     }
 
     pub fn send_uds(&mut self, request: &ValidatedUdsRequest) -> AppResult<StnReply> {

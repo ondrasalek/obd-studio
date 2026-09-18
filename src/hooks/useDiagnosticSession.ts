@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  clearEmissionDtcs as invokeClearEmissionDtcs,
   connectPort,
   disconnectPort,
   isTauriRuntime,
   listSerialPorts,
+  listVehicleCapabilities,
   normalizeCommandError,
   onConnectionState,
   onDiagnosticLog,
@@ -26,12 +28,26 @@ import type {
   LiveDataGroup,
   LiveDataSnapshot,
   SerialPortInfo,
+  ServiceOperationResult,
   StandardObdQuery,
   StandardObdResponse,
   UdsResponse,
+  VehicleCapability,
 } from "@/types/diagnostics";
 
 const MAX_LOG_ENTRIES = 500;
+const CONTROL_UNIT_AREAS: ControlUnitArea[] = [
+  "transmission",
+  "drivingModes",
+  "chassis",
+  "interior",
+  "body",
+  "windows",
+  "lighting",
+  "exterior",
+  "climate",
+  "infotainment",
+];
 
 function didProbeKey(area: ControlUnitArea, unitKey: string): string {
   return `${area}:${unitKey}`;
@@ -76,6 +92,11 @@ export function useDiagnosticSession() {
   const [error, setError] = useState<CommandError>();
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [capabilities, setCapabilities] = useState<VehicleCapability[]>([]);
+  const [fullScanRunning, setFullScanRunning] = useState(false);
+  const [scanProgress, setScanProgress] = useState({ completed: 0, total: CONTROL_UNIT_AREAS.length });
+  const [serviceOperation, setServiceOperation] = useState<ServiceOperationResult>();
+  const [serviceBusy, setServiceBusy] = useState(false);
 
   const appendLog = useCallback((event: DiagnosticLogEvent) => {
     const entry = { ...event, id: nextLogId.current++ };
@@ -111,6 +132,24 @@ export function useDiagnosticSession() {
   useEffect(() => {
     void refreshPorts();
   }, [refreshPorts]);
+
+  useEffect(() => {
+    if (!runtimeAvailable) {
+      setCapabilities([]);
+      return;
+    }
+    let cancelled = false;
+    void listVehicleCapabilities(selectedProfile)
+      .then((items) => {
+        if (!cancelled) setCapabilities(items);
+      })
+      .catch((caught) => {
+        if (!cancelled) setError(normalizeCommandError(caught));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [runtimeAvailable, selectedProfile]);
 
   useEffect(() => {
     if (!runtimeAvailable) {
@@ -176,6 +215,8 @@ export function useDiagnosticSession() {
       setLiveSnapshots({});
       setControlUnitSnapshots({});
       setDidProbeSnapshots({});
+      setScanProgress({ completed: 0, total: CONTROL_UNIT_AREAS.length });
+      setServiceOperation(undefined);
       setConnectionState("disconnected");
     } catch (caught) {
       setError(normalizeCommandError(caught));
@@ -245,6 +286,48 @@ export function useDiagnosticSession() {
     }
   }, []);
 
+  const scanAllControlUnits = useCallback(async () => {
+    if (selectedProfile !== "vwMqb") return;
+    setBusy(true);
+    setFullScanRunning(true);
+    setError(undefined);
+    setScanProgress({ completed: 0, total: CONTROL_UNIT_AREAS.length });
+    try {
+      for (const [index, area] of CONTROL_UNIT_AREAS.entries()) {
+        setScanningArea(area);
+        const snapshot = await invokeScanControlUnits(area);
+        setControlUnitSnapshots((current) => ({ ...current, [area]: snapshot }));
+        setScanProgress({ completed: index + 1, total: CONTROL_UNIT_AREAS.length });
+      }
+    } catch (caught) {
+      setError(normalizeCommandError(caught));
+    } finally {
+      setScanningArea(undefined);
+      setFullScanRunning(false);
+      setBusy(false);
+    }
+  }, [selectedProfile]);
+
+  const clearEmissionDtcs = useCallback(async (confirmation: string) => {
+    setBusy(true);
+    setServiceBusy(true);
+    setError(undefined);
+    setServiceOperation(undefined);
+    try {
+      const result = await invokeClearEmissionDtcs(confirmation);
+      setServiceOperation(result);
+      setLastObdResponse(undefined);
+      return result;
+    } catch (caught) {
+      const normalized = normalizeCommandError(caught);
+      setError(normalized);
+      throw normalized;
+    } finally {
+      setServiceBusy(false);
+      setBusy(false);
+    }
+  }, []);
+
   const probeDids = useCallback(
     async (area: ControlUnitArea, unitKey: string, dids: number[]) => {
       setBusy(true);
@@ -273,6 +356,7 @@ export function useDiagnosticSession() {
     setLiveSnapshots({});
     setControlUnitSnapshots({});
     setDidProbeSnapshots({});
+    setServiceOperation(undefined);
     setError(undefined);
   }, []);
 
@@ -299,6 +383,11 @@ export function useDiagnosticSession() {
     error,
     busy,
     refreshing,
+    capabilities,
+    fullScanRunning,
+    scanProgress,
+    serviceOperation,
+    serviceBusy,
     refreshPorts,
     connect,
     disconnect,
@@ -306,6 +395,8 @@ export function useDiagnosticSession() {
     readCentralElectronics,
     refreshLiveData,
     scanControlUnits,
+    scanAllControlUnits,
+    clearEmissionDtcs,
     probeDids,
     clearLogs,
   };

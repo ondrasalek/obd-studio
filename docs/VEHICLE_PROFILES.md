@@ -5,9 +5,10 @@ OBD Studio odděluje standardní kompatibilitu OBD-II od výrobce-specifické di
 ## `genericObd2`
 
 - nechá OBDLink EX automaticky detekovat legislativní protokol přes `ATSP0`
-- používá pouze pojmenované read-only dotazy z Rust allowlistu
+- používá pouze pojmenované dotazy a deklarované live PID z Rust allowlistu
 - neobsahuje CAN ID, DID ani kódovací funkce konkrétní značky
 - je vhodný pro základní motorovou a emisní diagnostiku vozidel kompatibilních s OBD-II/EOBD/JOBD
+- jako jedinou změnovou operaci nabízí pevný Mode `04`; command nemá raw payload a vyžaduje přesnou potvrzovací frázi, napětí alespoň 12,0 V a motor s ověřenými nulovými otáčkami
 
 Podpora konkrétního PID nebo VIN vždy závisí na implementaci vozidla. Standardní konektor ani úspěšné připojení samy o sobě neznamenají, že automobil poskytuje všechny položky.
 
@@ -17,9 +18,9 @@ Podpora konkrétního PID nebo VIN vždy závisí na implementaci vozidla. Stand
 - používá explicitní fyzické adresování a UDS
 - má vlastní read-only allowlist služeb
 - obsahuje experimentální předvolbu ECU 09/J519 pro Superb III facelift
-- zpřístupňuje read-only skupiny motor, vstřikování, DPF a turbo na fyzické adrese ECU motoru `0x7E0 → 0x7E8`
+- zpřístupňuje profilové read-only skupiny motor, vstřikování, DPF a turbo na fyzické adrese ECU motoru `0x7E0 → 0x7E8`; standardní PID doplňují elektrickou síť, emise a palivové údaje
 - obsahuje read-only katalog očekávaných ECU pro převodovku a pohon, jízdní režimy, podvozek a asistenty, interiér, karoserii a komfort, okna a dveře, světla, exteriér, klimatizaci a infotainment
-- oblast načte jednou po jejím otevření, pokud je automatika zapnutá, nebo ručně; u odpovídající jednotky čte part number `F187`, verzi software `F189` a počet potvrzených DTC přes `19 01 08`
+- při zapnuté automatice sekvenčně načte všechny oblasti po připojení, jinak ručně; u odpovídající jednotky čte part number `F187`, verzi software `F189` a potvrzené DTC přes `19 02 08`
 - výsledek „nezjištěna“ není hodnocen jako porucha, protože volitelná ECU nemusí být ve výbavě, může být uspána nebo nedostupná přes danou trasu
 - definice DPF byly ověřeny proti ECU `04L 906 027 P`; ostatní DID zůstávají experimentální a UI je při odmítnutí označí jako nepodporované
 - každá dostupná hodnota nese orientační hodnocení a vysvětlení; veličiny závislé na otáčkách nebo zatížení se bez potřebného kontextu neoznačují automaticky jako bezvadné

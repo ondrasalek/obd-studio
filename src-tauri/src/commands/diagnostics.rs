@@ -11,6 +11,21 @@ use crate::vehicle::{
 use tauri::State;
 
 #[tauri::command]
+pub fn list_vehicle_capabilities(
+    profile: crate::vehicle::DiagnosticProfile,
+) -> Vec<crate::vehicle::VehicleCapability> {
+    crate::vehicle::capabilities(profile)
+}
+
+#[tauri::command]
+pub async fn clear_emission_dtcs(
+    confirmation: String,
+    state: State<'_, AppState>,
+) -> AppResult<crate::transport::serial::ServiceOperationResult> {
+    state.diagnostic.clear_emission_dtcs(confirmation).await
+}
+
+#[tauri::command]
 pub async fn send_standard_obd_query(
     query: StandardObdQuery,
     state: State<'_, AppState>,
