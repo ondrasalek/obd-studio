@@ -38,6 +38,7 @@ pub struct LiveDataSnapshot {
     pub tx_id: u32,
     pub rx_id: u32,
     pub captured_at_ms: u64,
+    pub verification: super::LiveDataVerification,
     pub values: Vec<LiveDataValue>,
 }
 
@@ -56,10 +57,11 @@ pub struct LiveDataValue {
     pub detail: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum LiveDataStatus {
     Available,
+    Unverified,
     Unsupported,
     Error,
 }
@@ -405,10 +407,6 @@ pub(crate) fn signal_definitions(group: LiveDataGroup) -> &'static [SignalDefini
 }
 
 impl SignalDefinition {
-    pub fn request_hex(self) -> String {
-        format!("22{:04X}", self.did)
-    }
-
     pub fn available(self, payload_hex: String) -> AppResult<LiveDataValue> {
         let expected_prefix = format!("62{:04X}", self.did);
         let data_hex = payload_hex.strip_prefix(&expected_prefix).ok_or_else(|| {
@@ -462,6 +460,7 @@ impl SignalDefinition {
             LiveDataStatus::Unsupported => "Nepodporováno",
             LiveDataStatus::Error => "Nelze vyhodnotit",
             LiveDataStatus::Available => "Bez hodnocení",
+            LiveDataStatus::Unverified => "Neověřená varianta ECU",
         };
 
         LiveDataValue {
@@ -472,11 +471,7 @@ impl SignalDefinition {
             unit: self.unit.to_owned(),
             precision: self.precision,
             status,
-            assessment: assessment(
-                LiveDataAssessmentLevel::Unknown,
-                assessment_label,
-                "Řídicí jednotka neposkytla hodnotu, proto nelze určit její stav.",
-            ),
+            assessment: assessment(LiveDataAssessmentLevel::Unknown, assessment_label, &detail),
             raw_response,
             detail: Some(detail),
         }
@@ -764,7 +759,11 @@ fn assess_ambient_pressure(value: f64) -> LiveDataAssessment {
 }
 
 fn normal(detail: &str) -> LiveDataAssessment {
-    assessment(LiveDataAssessmentLevel::Normal, "V pořádku", detail)
+    assessment(
+        LiveDataAssessmentLevel::Normal,
+        "V orientačním rozsahu",
+        detail,
+    )
 }
 
 fn contextual(label: &str, detail: &str) -> LiveDataAssessment {

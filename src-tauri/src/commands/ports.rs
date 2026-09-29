@@ -19,6 +19,14 @@ pub async fn connect_port(
 }
 
 #[tauri::command]
+pub async fn connect_demo(
+    profile: DiagnosticProfile,
+    state: State<'_, AppState>,
+) -> AppResult<ConnectionInfo> {
+    state.diagnostic.connect_demo(profile).await
+}
+
+#[tauri::command]
 pub async fn disconnect_port(state: State<'_, AppState>) -> AppResult<()> {
     state.diagnostic.disconnect().await
 }

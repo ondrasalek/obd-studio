@@ -34,6 +34,12 @@ export async function connectPort(
   return invoke<ConnectionInfo>("connect_port", { path, profile });
 }
 
+export async function connectDemo(
+  profile: DiagnosticProfile,
+): Promise<ConnectionInfo> {
+  return invoke<ConnectionInfo>("connect_demo", { profile });
+}
+
 export async function disconnectPort(): Promise<void> {
   return invoke("disconnect_port");
 }

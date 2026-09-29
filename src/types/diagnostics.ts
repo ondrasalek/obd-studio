@@ -35,7 +35,7 @@ export type DidProbeStatus =
   | "rejected"
   | "error";
 
-export type LiveDataStatus = "available" | "unsupported" | "error";
+export type LiveDataStatus = "available" | "unverified" | "unsupported" | "error";
 
 export type LiveDataAssessmentLevel =
   | "normal"
@@ -68,7 +68,11 @@ export interface SerialPortInfo {
 
 export interface ConnectionInfo {
   path: string;
+  transport: string;
+  simulated: boolean;
   profile: DiagnosticProfile;
+  profileDefinition: string;
+  profileStatus: string;
   hardware: string;
   firmware: string;
   voltage: number | null;
@@ -140,7 +144,20 @@ export interface LiveDataSnapshot {
   txId: number;
   rxId: number;
   capturedAtMs: number;
+  verification: LiveDataVerification;
   values: LiveDataValue[];
+}
+
+export interface LiveDataVerification {
+  status: "standard" | "matched" | "unverified" | "simulated";
+  detail: string;
+  profileId: string;
+  profileVersion: string;
+  source: string;
+  identity: {
+    partNumber: string | null;
+    softwareVersion: string | null;
+  } | null;
 }
 
 export interface ControlUnitInfo {
@@ -210,6 +227,7 @@ export interface VehicleCapability {
   risk: CapabilityRisk;
   targetSection: string | null;
   requirements: string[];
+  category: string | null;
 }
 
 export interface ServiceOperationResult {

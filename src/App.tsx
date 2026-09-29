@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { AppShell } from "@/app/AppShell";
+import { WorkspaceNavigation } from "@/app/WorkspaceNavigation";
 import { DiagnosticStatusBar } from "@/app/DiagnosticStatusBar";
 import { ConnectionPanel } from "@/features/connection/ConnectionPanel";
 import { DiagnosticConsole } from "@/features/console/DiagnosticConsole";
@@ -135,8 +136,12 @@ function App() {
   };
 
   return (
-    <AppShell connectionState={session.connectionState}>
+    <AppShell
+      connectionState={session.connectionState}
+      simulated={session.connection?.simulated ?? false}
+    >
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card/20 shadow-sm">
+        <WorkspaceNavigation selected={selectedSection} onSelect={handleSelectSection} />
         <div className="grid min-h-0 flex-1 grid-cols-[264px_minmax(0,1fr)] overflow-hidden">
           <aside className="flex min-h-0 flex-col gap-3 overflow-hidden border-r bg-card/35 p-3">
             <ConnectionPanel
@@ -153,6 +158,7 @@ function App() {
               onProfileChange={session.selectProfile}
               onRefresh={session.refreshPorts}
               onConnect={session.connect}
+              onConnectDemo={session.connectDemo}
               onDisconnect={session.disconnect}
             />
             <DiagnosticNavigation

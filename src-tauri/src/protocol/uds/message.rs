@@ -61,7 +61,7 @@ impl UdsRequest {
             return Err(AppError::new(
                 "SERVICE_BLOCKED",
                 format!(
-                    "UDS služba 0x{service:02X} je v read-only MVP zablokovaná. Povoleny jsou 0x19, 0x22 a 0x3E."
+                    "UDS služba 0x{service:02X} je v read-only UDS režimu zablokovaná. Povoleny jsou 0x19, 0x22 a 0x3E."
                 ),
             ));
         }

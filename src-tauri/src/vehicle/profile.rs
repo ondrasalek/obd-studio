@@ -8,6 +8,13 @@ pub enum DiagnosticProfile {
 }
 
 impl DiagnosticProfile {
+    pub fn slug(self) -> &'static str {
+        match self {
+            Self::GenericObd2 => "generic-obd2",
+            Self::VwMqb => "vw-mqb",
+        }
+    }
+
     pub fn display_name(self) -> &'static str {
         match self {
             Self::GenericObd2 => "Standardní OBD-II · automatická detekce",
@@ -30,5 +37,11 @@ mod tests {
             serde_json::to_string(&DiagnosticProfile::VwMqb).unwrap(),
             "\"vwMqb\""
         );
+    }
+
+    #[test]
+    fn profile_has_stable_transport_slug() {
+        assert_eq!(DiagnosticProfile::GenericObd2.slug(), "generic-obd2");
+        assert_eq!(DiagnosticProfile::VwMqb.slug(), "vw-mqb");
     }
 }

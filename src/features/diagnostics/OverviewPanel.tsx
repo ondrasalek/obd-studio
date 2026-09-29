@@ -316,7 +316,9 @@ function ModuleShortcut({
         <span className="block text-xs font-medium">{section.title}</span>
         <span className="mt-0.5 block truncate text-[10px] font-normal text-muted-foreground">
           {snapshot
-            ? `${available ?? 0}/${snapshot.values.length} hodnot dostupných`
+            ? snapshot.verification.status === "unverified"
+              ? "Neověřená ECU · měření blokováno"
+              : `${snapshot.verification.status === "simulated" ? "Simulace · " : ""}${available ?? 0}/${snapshot.values.length} hodnot ve vzorku`
             : section.description}
         </span>
       </span>

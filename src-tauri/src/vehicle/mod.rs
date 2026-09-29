@@ -1,9 +1,13 @@
 mod capabilities;
+mod coding_catalog;
 mod control_units;
 mod live_data;
+mod manifest;
 pub mod mqb;
 mod obd_live_data;
 mod profile;
+mod verification;
+mod verified_live_data;
 
 pub use capabilities::{capabilities, VehicleCapability};
 pub(crate) use control_units::{
@@ -17,5 +21,8 @@ pub use control_units::{
 };
 pub(crate) use live_data::{signal_definitions, ENGINE_RX_ID, ENGINE_TX_ID};
 pub use live_data::{LiveDataGroup, LiveDataSnapshot, LiveDataStatus};
+pub(crate) use manifest::profile_manifest;
 pub(crate) use obd_live_data::{engine_rpm_from_reply, obd_signal_definitions};
 pub use profile::DiagnosticProfile;
+pub use verification::LiveDataVerification;
+pub(crate) use verified_live_data::read_verified_mqb_values;

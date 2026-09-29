@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 2,
+  "id": "vw-mqb",
+  "version": "0.3.0",
+  "displayName": "Volkswagen Group MQB · experimentální read-only profil",
+  "diagnosticProfile": "vwMqb",
+  "status": "experimental",
+  "transport": {
+    "protocol": "ISO 15765 · 11-bit · 500 kbps",
+    "addressing": "physical"
+  },
+  "readServices": ["19", "22", "3E"],
+  "writeServices": [],
+  "variantMatchers": [
+    {
+      "ecuAddress": "01",
+      "partNumber": "04L906027P",
+      "softwareVersions": [],
+      "signalGroups": ["dpf"],
+      "scope": "Kandidátní dekodéry DPF; přesné verze software čekají na doložení"
+    }
+  ],
+  "dataSource": {
+    "kind": "curated",
+    "reference": "Projektové definice; chybí doložená vazba na přesnou verzi software ECU"
+  }
+}

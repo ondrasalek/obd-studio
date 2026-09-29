@@ -52,6 +52,12 @@ export function DiagnosticStatusBar({
           aria-hidden="true"
         />
         <span>{STATE_LABELS[connectionState]}</span>
+        {connection?.simulated ? (
+          <>
+            <span aria-hidden="true">·</span>
+            <span className="font-semibold text-sky-300">DEMO · bez vozidla</span>
+          </>
+        ) : null}
         <span aria-hidden="true">·</span>
         <Cable className="size-3" aria-hidden="true" />
         <span className="max-w-80 truncate" title={connection?.path || selectedPort}>

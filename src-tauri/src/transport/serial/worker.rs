@@ -3,19 +3,20 @@ use crate::error::{AppError, AppResult};
 use crate::events::{emit_connection_state, emit_log, LogDirection, LogKind};
 use crate::protocol::obd2::{parse_standard_obd_response, StandardObdQuery, StandardObdResponse};
 use crate::protocol::uds::{parse_uds_response, UdsRequest, UdsResponse};
+use crate::transport::stn::{DemoStnTransport, SerialStnTransport, StnTransport};
 use crate::vehicle::{
     control_unit_definitions, decode_ascii_identifier, decode_dtc_list, engine_rpm_from_reply,
-    extract_did_data, find_control_unit_definition, obd_signal_definitions, signal_definitions,
-    validate_probe_dids, ControlUnitArea, ControlUnitAreaSnapshot, ControlUnitDefinition,
-    ControlUnitInfo, ControlUnitScanStatus, DiagnosticProfile, DidProbeSnapshot, DidProbeStatus,
-    DidProbeValue, LiveDataGroup, LiveDataSnapshot, LiveDataStatus, CONFIRMED_DTC_LIST_REQUEST,
+    extract_did_data, find_control_unit_definition, obd_signal_definitions, profile_manifest,
+    read_verified_mqb_values, signal_definitions, validate_probe_dids, ControlUnitArea,
+    ControlUnitAreaSnapshot, ControlUnitDefinition, ControlUnitInfo, ControlUnitScanStatus,
+    DiagnosticProfile, DidProbeSnapshot, DidProbeStatus, DidProbeValue, LiveDataGroup,
+    LiveDataSnapshot, LiveDataStatus, LiveDataVerification, CONFIRMED_DTC_LIST_REQUEST,
     ENGINE_RX_ID, ENGINE_TX_ID,
 };
 use serde::Serialize;
-use serialport::{DataBits, FlowControl, Parity, SerialPort, StopBits};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
 use tokio::sync::oneshot;
 
@@ -23,7 +24,11 @@ use tokio::sync::oneshot;
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionInfo {
     pub path: String,
+    pub transport: String,
+    pub simulated: bool,
     pub profile: DiagnosticProfile,
+    pub profile_definition: String,
+    pub profile_status: String,
     pub hardware: String,
     pub firmware: String,
     pub voltage: Option<f32>,
@@ -77,6 +82,17 @@ impl DiagnosticHandle {
         let (respond_to, response) = oneshot::channel();
         self.sender
             .send(WorkerCommand::Disconnect { respond_to })
+            .map_err(|_| AppError::worker_unavailable())?;
+        response.await.map_err(|_| AppError::worker_unavailable())?
+    }
+
+    pub async fn connect_demo(&self, profile: DiagnosticProfile) -> AppResult<ConnectionInfo> {
+        let (respond_to, response) = oneshot::channel();
+        self.sender
+            .send(WorkerCommand::ConnectDemo {
+                profile,
+                respond_to,
+            })
             .map_err(|_| AppError::worker_unavailable())?;
         response.await.map_err(|_| AppError::worker_unavailable())?
     }
@@ -161,6 +177,10 @@ enum WorkerCommand {
         profile: DiagnosticProfile,
         respond_to: oneshot::Sender<AppResult<ConnectionInfo>>,
     },
+    ConnectDemo {
+        profile: DiagnosticProfile,
+        respond_to: oneshot::Sender<AppResult<ConnectionInfo>>,
+    },
     Disconnect {
         respond_to: oneshot::Sender<AppResult<()>>,
     },
@@ -194,7 +214,7 @@ enum WorkerCommand {
 
 struct SerialWorker {
     app: AppHandle,
-    port: Option<Box<dyn SerialPort>>,
+    transport: Option<Box<dyn StnTransport>>,
     profile: Option<DiagnosticProfile>,
     next_request_id: u64,
 }
@@ -203,7 +223,7 @@ impl SerialWorker {
     fn new(app: AppHandle) -> Self {
         Self {
             app,
-            port: None,
+            transport: None,
             profile: None,
             next_request_id: 1,
         }
@@ -218,6 +238,14 @@ impl SerialWorker {
                     respond_to,
                 } => {
                     let result = self.connect(path, profile);
+                    self.report_error(&result, true);
+                    let _ = respond_to.send(result);
+                }
+                WorkerCommand::ConnectDemo {
+                    profile,
+                    respond_to,
+                } => {
+                    let result = self.connect_demo(profile);
                     self.report_error(&result, true);
                     let _ = respond_to.send(result);
                 }
@@ -274,10 +302,9 @@ impl SerialWorker {
     }
 
     fn connect(&mut self, path: String, profile: DiagnosticProfile) -> AppResult<ConnectionInfo> {
-        if self.port.is_some() {
+        if self.transport.is_some() {
             self.disconnect()?;
         }
-
         emit_connection_state(&self.app, "connecting", Some(path.clone()));
         emit_log(
             &self.app,
@@ -285,20 +312,41 @@ impl SerialWorker {
             LogKind::Status,
             format!("Otevírám {path} @ 115200 8-N-1"),
         );
+        let transport = Box::new(SerialStnTransport::open(&path)?);
+        self.connect_transport(path, profile, transport)
+    }
 
-        let mut port = serialport::new(&path, 115_200)
-            .data_bits(DataBits::Eight)
-            .parity(Parity::None)
-            .stop_bits(StopBits::One)
-            .flow_control(FlowControl::None)
-            .timeout(Duration::from_millis(50))
-            .open()
-            .map_err(|error| AppError::serial(format!("Port {path} nelze otevřít: {error}")))?;
+    fn connect_demo(&mut self, profile: DiagnosticProfile) -> AppResult<ConnectionInfo> {
+        if self.transport.is_some() {
+            self.disconnect()?;
+        }
+        let path = format!("demo://{}", profile.slug());
+        emit_connection_state(&self.app, "connecting", Some(path.clone()));
+        emit_log(
+            &self.app,
+            LogDirection::System,
+            LogKind::Status,
+            format!("Spouštím offline demo relaci: {}.", profile.display_name()),
+        );
+        let transport = Box::new(DemoStnTransport::new(profile));
+        self.connect_transport(path, profile, transport)
+    }
 
-        let identity = StnClient::new(port.as_mut(), &self.app).initialize(profile)?;
+    fn connect_transport(
+        &mut self,
+        path: String,
+        profile: DiagnosticProfile,
+        mut transport: Box<dyn StnTransport>,
+    ) -> AppResult<ConnectionInfo> {
+        let manifest = profile_manifest(profile)?;
+        let identity = StnClient::new(transport.as_mut(), &self.app).initialize(profile)?;
         let connection = ConnectionInfo {
             path,
+            transport: transport.description(),
+            simulated: transport.is_simulated(),
             profile,
+            profile_definition: format!("{} v{}", manifest.id, manifest.version),
+            profile_status: manifest.status.display_name().to_owned(),
             hardware: identity.hardware,
             firmware: identity.firmware,
             voltage: identity.voltage,
@@ -307,7 +355,7 @@ impl SerialWorker {
             bus_ready: true,
         };
 
-        self.port = Some(port);
+        self.transport = Some(transport);
         self.profile = Some(profile);
         emit_connection_state(
             &self.app,
@@ -327,9 +375,8 @@ impl SerialWorker {
     }
 
     fn disconnect(&mut self) -> AppResult<()> {
-        if let Some(mut port) = self.port.take() {
-            StnClient::new(port.as_mut(), &self.app).close_protocol();
-            drop(port);
+        if let Some(mut transport) = self.transport.take() {
+            StnClient::new(transport.as_mut(), &self.app).close_protocol();
         }
         self.profile = None;
         emit_connection_state(&self.app, "disconnected", None);
@@ -343,7 +390,7 @@ impl SerialWorker {
     }
 
     fn send_uds(&mut self, request: UdsRequest) -> AppResult<UdsResponse> {
-        if self.port.is_none() {
+        if self.transport.is_none() {
             return Err(AppError::disconnected());
         }
         if self.profile != Some(DiagnosticProfile::VwMqb) {
@@ -353,16 +400,16 @@ impl SerialWorker {
             ));
         }
         let request = request.validate()?;
-        let port = self.port.as_mut().ok_or_else(AppError::disconnected)?;
+        let transport = self.transport.as_mut().ok_or_else(AppError::disconnected)?;
         let request_id = self.next_request_id;
         self.next_request_id = self.next_request_id.saturating_add(1);
 
-        let reply = StnClient::new(port.as_mut(), &self.app).send_uds(&request)?;
+        let reply = StnClient::new(transport.as_mut(), &self.app).send_uds(&request)?;
         parse_uds_response(request_id, &request, reply)
     }
 
     fn send_standard_obd(&mut self, query: StandardObdQuery) -> AppResult<StandardObdResponse> {
-        if self.port.is_none() {
+        if self.transport.is_none() {
             return Err(AppError::disconnected());
         }
         if self.profile != Some(DiagnosticProfile::GenericObd2) {
@@ -373,18 +420,18 @@ impl SerialWorker {
         }
 
         let request = query.into_request();
-        let port = self.port.as_mut().ok_or_else(AppError::disconnected)?;
+        let transport = self.transport.as_mut().ok_or_else(AppError::disconnected)?;
         let request_id = self.next_request_id;
         self.next_request_id = self.next_request_id.saturating_add(1);
 
-        let mut client = StnClient::new(port.as_mut(), &self.app);
+        let mut client = StnClient::new(transport.as_mut(), &self.app);
         let reply = client.send_standard_obd(&request)?;
         let detected_protocol = client.detected_protocol();
         parse_standard_obd_response(request_id, &request, reply, detected_protocol)
     }
 
     fn read_live_data(&mut self, group: LiveDataGroup) -> AppResult<LiveDataSnapshot> {
-        if self.port.is_none() {
+        if self.transport.is_none() {
             return Err(AppError::disconnected());
         }
         let profile = self.profile.ok_or_else(AppError::disconnected)?;
@@ -392,55 +439,27 @@ impl SerialWorker {
             return self.read_standard_live_data(group, profile == DiagnosticProfile::VwMqb);
         }
 
-        let port = self.port.as_mut().ok_or_else(AppError::disconnected)?;
-        let mut client = StnClient::new(port.as_mut(), &self.app);
+        let manifest = profile_manifest(profile)?;
+        let transport = self.transport.as_mut().ok_or_else(AppError::disconnected)?;
+        let simulated = transport.is_simulated();
+        let mut client = StnClient::new(transport.as_mut(), &self.app);
         client.select_target(ENGINE_TX_ID, ENGINE_RX_ID)?;
 
-        let mut values = Vec::with_capacity(signal_definitions(group).len());
-        for definition in signal_definitions(group) {
-            let request = UdsRequest {
-                tx_id: ENGINE_TX_ID,
-                rx_id: ENGINE_RX_ID,
-                payload_hex: definition.request_hex(),
-                timeout_ms: Some(1_500),
-            }
-            .validate()?;
-            let request_id = self.next_request_id;
-            self.next_request_id = self.next_request_id.saturating_add(1);
+        let (verification, values) =
+            read_verified_mqb_values(group, &manifest, simulated, |did| {
+                let request = UdsRequest {
+                    tx_id: ENGINE_TX_ID,
+                    rx_id: ENGINE_RX_ID,
+                    payload_hex: format!("22{did:04X}"),
+                    timeout_ms: Some(1_500),
+                }
+                .validate()?;
+                let request_id = self.next_request_id;
+                self.next_request_id = self.next_request_id.saturating_add(1);
 
-            let value = match client.send_uds_to_selected_target(&request) {
-                Ok(reply) => match parse_uds_response(request_id, &request, reply) {
-                    Ok(response) => {
-                        if let Some(negative) = response.negative_response {
-                            let status = if matches!(negative.code.as_str(), "11" | "12" | "31") {
-                                LiveDataStatus::Unsupported
-                            } else {
-                                LiveDataStatus::Error
-                            };
-                            definition.unavailable(
-                                status,
-                                negative.description,
-                                Some(response.payload_hex),
-                            )
-                        } else {
-                            match definition.available(response.payload_hex.clone()) {
-                                Ok(value) => value,
-                                Err(error) => definition.unavailable(
-                                    LiveDataStatus::Error,
-                                    error.message,
-                                    Some(response.payload_hex),
-                                ),
-                            }
-                        }
-                    }
-                    Err(error) => {
-                        definition.unavailable(LiveDataStatus::Error, error.message, None)
-                    }
-                },
-                Err(error) => definition.unavailable(LiveDataStatus::Error, error.message, None),
-            };
-            values.push(value);
-        }
+                let reply = client.send_uds_to_selected_target(&request)?;
+                parse_uds_response(request_id, &request, reply)
+            })?;
 
         let available = values
             .iter()
@@ -451,14 +470,16 @@ impl SerialWorker {
             LogDirection::System,
             LogKind::Status,
             format!(
-                "{}: načteno {available}/{} živých hodnot.",
+                "{}: načteno {available}/{} živých hodnot. {}",
                 group.display_name(),
-                values.len()
+                values.len(),
+                verification.detail,
             ),
         );
 
         Ok(LiveDataSnapshot {
             group,
+            verification,
             ecu_name: "01 · Řídicí jednotka motoru".to_owned(),
             tx_id: ENGINE_TX_ID,
             rx_id: ENGINE_RX_ID,
@@ -475,6 +496,7 @@ impl SerialWorker {
         group: LiveDataGroup,
         physically_addressed: bool,
     ) -> AppResult<LiveDataSnapshot> {
+        let manifest = profile_manifest(DiagnosticProfile::GenericObd2)?;
         let definitions = obd_signal_definitions(group);
         if definitions.is_empty() {
             return Err(AppError::new(
@@ -483,8 +505,9 @@ impl SerialWorker {
             ));
         }
 
-        let port = self.port.as_mut().ok_or_else(AppError::disconnected)?;
-        let mut client = StnClient::new(port.as_mut(), &self.app);
+        let transport = self.transport.as_mut().ok_or_else(AppError::disconnected)?;
+        let verification = LiveDataVerification::standard(&manifest, transport.is_simulated());
+        let mut client = StnClient::new(transport.as_mut(), &self.app);
         if physically_addressed {
             client.select_target(ENGINE_TX_ID, ENGINE_RX_ID)?;
         }
@@ -534,6 +557,7 @@ impl SerialWorker {
 
         Ok(LiveDataSnapshot {
             group,
+            verification,
             ecu_name: "Motorová ECU · legislativní OBD-II".to_owned(),
             tx_id: ENGINE_TX_ID,
             rx_id: ENGINE_RX_ID,
@@ -548,8 +572,8 @@ impl SerialWorker {
     fn clear_emission_dtcs(&mut self, confirmation: &str) -> AppResult<ServiceOperationResult> {
         validate_clear_emission_dtc_request(confirmation, self.profile)?;
 
-        let port = self.port.as_mut().ok_or_else(AppError::disconnected)?;
-        let mut client = StnClient::new(port.as_mut(), &self.app);
+        let transport = self.transport.as_mut().ok_or_else(AppError::disconnected)?;
+        let mut client = StnClient::new(transport.as_mut(), &self.app);
         let voltage = client.supply_voltage()?;
 
         let rpm_reply = client.send_standard_current_data_pid(0x0C, 3_000)?;
@@ -579,7 +603,7 @@ impl SerialWorker {
     }
 
     fn scan_control_units(&mut self, area: ControlUnitArea) -> AppResult<ControlUnitAreaSnapshot> {
-        if self.port.is_none() {
+        if self.transport.is_none() {
             return Err(AppError::disconnected());
         }
         if self.profile != Some(DiagnosticProfile::VwMqb) {
@@ -589,8 +613,8 @@ impl SerialWorker {
             ));
         }
 
-        let port = self.port.as_mut().ok_or_else(AppError::disconnected)?;
-        let mut client = StnClient::new(port.as_mut(), &self.app);
+        let transport = self.transport.as_mut().ok_or_else(AppError::disconnected)?;
+        let mut client = StnClient::new(transport.as_mut(), &self.app);
         let definitions = control_unit_definitions(area);
         let mut units = Vec::with_capacity(definitions.len());
 
@@ -702,7 +726,7 @@ impl SerialWorker {
         unit_key: &str,
         dids: Vec<u16>,
     ) -> AppResult<DidProbeSnapshot> {
-        if self.port.is_none() {
+        if self.transport.is_none() {
             return Err(AppError::disconnected());
         }
         if self.profile != Some(DiagnosticProfile::VwMqb) {
@@ -714,8 +738,8 @@ impl SerialWorker {
 
         let definition = find_control_unit_definition(area, unit_key)?;
         let dids = validate_probe_dids(dids)?;
-        let port = self.port.as_mut().ok_or_else(AppError::disconnected)?;
-        let mut client = StnClient::new(port.as_mut(), &self.app);
+        let transport = self.transport.as_mut().ok_or_else(AppError::disconnected)?;
+        let mut client = StnClient::new(transport.as_mut(), &self.app);
         client.select_target(definition.tx_id, definition.rx_id)?;
 
         let mut values = Vec::with_capacity(dids.len());

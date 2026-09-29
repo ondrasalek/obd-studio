@@ -1,6 +1,6 @@
 # OBDLink EX: sériová a protokolová inicializace
 
-Implementace vychází z OBDLink Family Reference and Programming Manual, revize F (2025). OBDLink EX používá USB UART `115200 8-N-1`; software musí po každém příkazu čekat na prompt `>`.
+Implementace vychází z OBDLink Family Reference and Programming Manual, revize F (2025). OBDLink EX používá USB UART `115200 8-N-1`; software musí po každém příkazu čekat na prompt `>`. Produkt existuje v revizích STN2230, STN2231 a STN2232, proto aplikace neodvozuje schopnosti jen z jednoho pevného čísla čipu a vždy čte skutečné `STDI`/`STI`.
 
 ## Připojení
 
@@ -84,14 +84,15 @@ Potom se request odešle atomicky například:
 STPX h:70E,d:22F187,t:1000,r:1
 ```
 
-Hodnota `22F187` je UDS ReadDataByIdentifier. STPX dočasně zapne potřebnou segmentaci, parametr `t` přepíše response timeout a `r:1` očekává jednu fyzickou odpověď.
+Hodnota `22F187` je UDS ReadDataByIdentifier. STPX předá zprávu internímu ISO-TP subsystému adaptéru, parametr `t` přepíše response timeout a `r:1` očekává jednu fyzickou odpověď. OBDLink provádí CAN segmentaci, reassembly a flow control; Rust vrstva pracuje s úplným UDS payloadem.
 
 ## Poznámky k reálnému vozidlu
 
 - Testovací profil předpokládá ECU 09/J519 na `0x70E → 0x778`. Adresy je nutné potvrdit pro konkrétní vůz a gateway.
 - Automatický profil potvrzuje jen standardní OBD-II kompatibilitu. Neobjevuje výrobce-specifické řídicí jednotky a neposkytuje komfortní kódování jiné značky.
 - OBDLink EX existuje v několika hardwarových revizích; aplikace proto čte `STDI` a `STI` a neváže komunikaci na jediný číselný identifikátor čipu.
+- Přepnutí UART na 2 Mbit/s není součástí bezpečné inicializace. Vyžaduje koordinovanou změnu rychlosti hostitele, ověření konkrétní revize adaptéru a recovery postup; pro diagnostické čtení zůstává výchozí rychlost 115200 stabilnější volbou.
 - Napětí se v MVP pouze zobrazuje. Jakákoli budoucí zapisovací funkce musí mít tvrdý voltage interlock a stabilizované napájení.
 - Při vývoji používejte ECU simulátor nebo bench setup; živé vozidlo není vhodné jako první test prostředí.
 
-Referenční dokument: [OBDLink Family Reference and Programming Manual](https://www.scantool.net/scantool/downloads/98/stn11xx21xx_frpm-c.pdf).
+Referenční dokument: [OBDLink Family Reference and Programming Manual, revize F](https://www.scantool.net/scantool/downloads/682/obdlink_frpm_f.pdf).

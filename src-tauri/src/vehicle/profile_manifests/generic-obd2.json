@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 2,
+  "id": "generic-obd2",
+  "version": "1.0.0",
+  "displayName": "Standardní OBD-II / EOBD / JOBD",
+  "diagnosticProfile": "genericObd2",
+  "status": "standard",
+  "transport": {
+    "protocol": "automatic legislated OBD-II",
+    "addressing": "functional"
+  },
+  "readServices": ["01", "03", "09"],
+  "writeServices": ["04"],
+  "variantMatchers": [],
+  "dataSource": {
+    "kind": "standard",
+    "reference": "SAE J1979 / ISO 15031-5"
+  }
+}

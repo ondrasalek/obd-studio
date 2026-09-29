@@ -1,5 +1,7 @@
 import {
   Cable,
+  ChevronDown,
+  FlaskConical,
   Globe2,
   LoaderCircle,
   PlugZap,
@@ -16,9 +18,15 @@ import {
   CardAction,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   Select,
   SelectContent,
@@ -53,10 +61,14 @@ interface ConnectionPanelProps {
   onProfileChange: (profile: DiagnosticProfile) => void;
   onRefresh: () => Promise<void>;
   onConnect: () => Promise<void>;
+  onConnectDemo: () => Promise<void>;
   onDisconnect: () => Promise<void>;
 }
 
-const statusVariant: Record<ConnectionState, "secondary" | "default" | "destructive"> = {
+const statusVariant: Record<
+  ConnectionState,
+  "secondary" | "default" | "destructive"
+> = {
   disconnected: "secondary",
   connecting: "secondary",
   busReady: "default",
@@ -89,32 +101,37 @@ export function ConnectionPanel({
   onProfileChange,
   onRefresh,
   onConnect,
+  onConnectDemo,
   onDisconnect,
 }: ConnectionPanelProps) {
   const selected = ports.find((port) => port.path === selectedPort);
   const connected = connectionState === "busReady";
 
   return (
-    <Card size="sm" className="shrink-0">
-      <CardHeader>
+    <Card size="sm" className="min-h-0 max-h-[55%] shrink-0">
+      <CardHeader className="shrink-0">
         <CardTitle className="flex items-center gap-2">
           <Cable className="size-4 text-primary" aria-hidden="true" />
           Diagnostický adaptér
         </CardTitle>
         <CardDescription>
-          USB sériové připojení k OBDLink EX
+          OBDLink EX přes USB nebo bezpečná offline simulace
         </CardDescription>
         <CardAction>
           <Badge
             variant={statusVariant[connectionState]}
-            className={connectionState === "busReady" ? "bg-emerald-500/15 text-emerald-300" : undefined}
+            className={
+              connectionState === "busReady"
+                ? "bg-emerald-500/15 text-emerald-300"
+                : undefined
+            }
           >
             {statusLabel[connectionState]}
           </Badge>
         </CardAction>
       </CardHeader>
 
-      <CardContent className="space-y-4">
+      <CardContent className="min-h-0 space-y-4 overflow-y-auto">
         {!runtimeAvailable ? (
           <Alert>
             <WifiOff aria-hidden="true" />
@@ -229,32 +246,79 @@ export function ConnectionPanel({
           </Alert>
         ) : null}
 
-        {connection ? (
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-lg border bg-muted/25 p-3 text-xs">
-            <ConnectionMetric
-              label="Profil"
-              value={profileLabel[connection.profile]}
-            />
-            <ConnectionMetric label="Protokol" value={connection.protocol} />
-            <ConnectionMetric label="Hardware" value={connection.hardware} />
-            <ConnectionMetric label="Firmware" value={connection.firmware} />
-            {connection.canBitrate != null ? (
-              <ConnectionMetric
-                label="CAN"
-                value={`${(connection.canBitrate / 1_000).toFixed(0)} kbps`}
-              />
-            ) : null}
-            <ConnectionMetric
-              label="Napětí"
-              value={
-                connection.voltage != null
-                  ? `${connection.voltage.toFixed(2)} V`
-                  : "—"
-              }
-            />
-          </dl>
+        {connection?.simulated ? (
+          <Alert className="border-sky-500/20 bg-sky-500/5">
+            <FlaskConical className="text-sky-400" aria-hidden="true" />
+            <AlertTitle>Offline demo relace</AlertTitle>
+            <AlertDescription>
+              Testovací data bez vozidla. Katalog úprav otevřete nahoře přes
+              Kódování.
+            </AlertDescription>
+          </Alert>
         ) : null}
 
+        {connection ? (
+          <Collapsible className="space-y-2">
+            <CollapsibleTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="group w-full justify-between"
+              >
+                Podrobnosti adaptéru
+                <ChevronDown
+                  className="transition-transform group-data-[state=open]:rotate-180"
+                  aria-hidden="true"
+                />
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-lg border bg-muted/25 p-3 text-xs">
+                <ConnectionMetric
+                  label="Profil"
+                  value={profileLabel[connection.profile]}
+                />
+                <ConnectionMetric
+                  label="Definice"
+                  value={`${connection.profileDefinition} · ${connection.profileStatus}`}
+                />
+                <ConnectionMetric
+                  label="Transport"
+                  value={connection.transport}
+                />
+                <ConnectionMetric
+                  label="Protokol"
+                  value={connection.protocol}
+                />
+                <ConnectionMetric
+                  label="Hardware"
+                  value={connection.hardware}
+                />
+                <ConnectionMetric
+                  label="Firmware"
+                  value={connection.firmware}
+                />
+                {connection.canBitrate != null ? (
+                  <ConnectionMetric
+                    label="CAN"
+                    value={`${(connection.canBitrate / 1_000).toFixed(0)} kbps`}
+                  />
+                ) : null}
+                <ConnectionMetric
+                  label="Napětí"
+                  value={
+                    connection.voltage != null
+                      ? `${connection.voltage.toFixed(2)} V`
+                      : "—"
+                  }
+                />
+              </dl>
+            </CollapsibleContent>
+          </Collapsible>
+        ) : null}
+      </CardContent>
+      <CardFooter className="shrink-0 px-3 py-3">
         {connected ? (
           <Button
             type="button"
@@ -263,21 +327,47 @@ export function ConnectionPanel({
             disabled={busy}
             onClick={() => void onDisconnect()}
           >
-            {busy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Unplug aria-hidden="true" />}
+            {busy ? (
+              <LoaderCircle className="animate-spin" aria-hidden="true" />
+            ) : (
+              <Unplug aria-hidden="true" />
+            )}
             Odpojit
           </Button>
         ) : (
-          <Button
-            type="button"
-            className="w-full"
-            disabled={!selectedPort || busy || !runtimeAvailable}
-            onClick={() => void onConnect()}
-          >
-            {busy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <PlugZap aria-hidden="true" />}
-            Připojit a inicializovat
-          </Button>
+          <div className="grid w-full grid-cols-[minmax(0,1fr)_auto] gap-2">
+            <Button
+              type="button"
+              disabled={!selectedPort || busy || !runtimeAvailable}
+              onClick={() => void onConnect()}
+            >
+              {busy ? (
+                <LoaderCircle className="animate-spin" aria-hidden="true" />
+              ) : (
+                <PlugZap aria-hidden="true" />
+              )}
+              Připojit
+            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={busy || !runtimeAvailable}
+                  onClick={() => void onConnectDemo()}
+                  aria-label="Spustit offline demo bez adaptéru a vozidla"
+                >
+                  <FlaskConical aria-hidden="true" />
+                  Demo
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                Testovací relace bez adaptéru a auta
+              </TooltipContent>
+            </Tooltip>
+          </div>
         )}
-      </CardContent>
+      </CardFooter>
     </Card>
   );
 }

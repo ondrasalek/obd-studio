@@ -16,6 +16,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type {
@@ -103,11 +104,23 @@ export function CapabilityCenter({
   serviceResult,
   onClearEmissionDtcs,
 }: CapabilityCenterProps) {
+  const [search, setSearch] = useState("");
   const config = KIND_CONFIG[kind];
   const Icon = config.icon;
   const items = capabilities.filter(
     (item) => item.kind === kind && !(kind === "service" && item.id === "clear-dtc"),
   );
+  const query = kind === "coding" ? normalizeSearch(search) : "";
+  const visibleItems = items.filter((item) =>
+    normalizeSearch([item.title, item.description, item.category, ...item.requirements].join(" ")).includes(query),
+  );
+  const groups = new Map<string, VehicleCapability[]>();
+  for (const item of visibleItems) {
+    const category = item.category ?? "";
+    const group = groups.get(category) ?? [];
+    group.push(item);
+    groups.set(category, group);
+  }
 
   return (
     <div className="space-y-4">
@@ -127,11 +140,12 @@ export function CapabilityCenter({
           {kind === "coding" ? (
             <Alert className="border-amber-500/20 bg-amber-500/5">
               <ShieldAlert className="text-amber-400" aria-hidden="true" />
-              <AlertTitle>Zápis není obecný hex příkaz</AlertTitle>
+              <AlertTitle>Katalog návrhů · zápis zatím není implementovaný</AlertTitle>
               <AlertDescription>
-                Funkce se zpřístupní teprve po shodě čísla dílu a verze softwaru
-                ECU s ověřeným profilem. Každá operace bude vyžadovat zálohu,
-                napětí alespoň 12,5 V, potvrzení a kontrolní čtení po zápisu.
+                Tento seznam nepotvrzuje podporu vašeho vozidla. Dostupnost závisí na
+                značce, modelu, roku, výbavě a přesné variantě ECU. Zápis bude vyžadovat
+                ověřený profil, zálohu, předepsané napájení, potvrzení a kontrolní čtení.
+                Samotné připojení adaptéru tyto funkce neodemkne.
               </AlertDescription>
             </Alert>
           ) : kind === "service" ? (
@@ -174,8 +188,19 @@ export function CapabilityCenter({
             />
           ) : null}
 
-          <div className="grid gap-3 xl:grid-cols-2">
-            {items.map((item) => (
+          {kind === "coding" ? (
+            <div className="space-y-2">
+              <Label htmlFor="coding-search" className="text-xs font-medium">Hledat úpravu nebo požadovanou výbavu</Label>
+              <Input id="coding-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Např. zrcátka, světla, klimatizace…" />
+              <p className="text-xs text-muted-foreground" role="status">{visibleItems.length} z {items.length} návrhů · dostupnost na vozidle neověřena</p>
+            </div>
+          ) : null}
+
+          {Array.from(groups, ([category, groupedItems]) => (
+            <section key={category} aria-label={category || config.title} className="space-y-3">
+              {category ? <h3 className="border-b pb-2 text-sm font-semibold">{category}</h3> : null}
+              <div className="grid gap-3 xl:grid-cols-2">
+            {groupedItems.map((item) => (
               <CapabilityCard
                 key={item.id}
                 item={item}
@@ -184,7 +209,10 @@ export function CapabilityCenter({
                 onNavigate={onNavigate}
               />
             ))}
-          </div>
+              </div>
+            </section>
+          ))}
+          {visibleItems.length === 0 ? <p className="py-6 text-sm text-muted-foreground">Žádné odpovídající položky.</p> : null}
         </CardContent>
       </Card>
     </div>
@@ -309,7 +337,7 @@ function CapabilityCard({
     <article className="flex min-h-44 flex-col rounded-lg border bg-background/35 p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="text-sm font-medium">{item.title}</h3>
+          <h4 className="text-sm font-medium">{item.title}</h4>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
             {item.description}
           </p>
@@ -325,7 +353,7 @@ function CapabilityCard({
 
       {item.requirements.length > 0 ? (
         <ul className="mt-3 space-y-1 text-[11px] text-muted-foreground">
-          {item.requirements.slice(0, 3).map((requirement) => (
+          {item.requirements.map((requirement) => (
             <li key={requirement} className="flex gap-2">
               <span aria-hidden="true">•</span>
               <span>{requirement}</span>
@@ -357,4 +385,8 @@ function CapabilityCard({
       </div>
     </article>
   );
+}
+
+function normalizeSearch(value: string): string {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("cs-CZ").trim();
 }

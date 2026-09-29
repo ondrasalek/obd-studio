@@ -7,6 +7,7 @@ import type { ConnectionState } from "@/types/diagnostics";
 interface AppShellProps {
   children: ReactNode;
   connectionState: ConnectionState;
+  simulated: boolean;
 }
 
 const stateLabels: Record<ConnectionState, string> = {
@@ -16,7 +17,7 @@ const stateLabels: Record<ConnectionState, string> = {
   error: "Chyba spojení",
 };
 
-export function AppShell({ children, connectionState }: AppShellProps) {
+export function AppShell({ children, connectionState, simulated }: AppShellProps) {
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
       <header className="border-b border-border/80 bg-card/40">
@@ -41,9 +42,17 @@ export function AppShell({ children, connectionState }: AppShellProps) {
           </div>
 
           <div className="flex items-center gap-3">
+            {simulated ? (
+              <Badge
+                variant="outline"
+                className="border-sky-500/25 bg-sky-500/10 font-mono text-sky-300"
+              >
+                OFFLINE DEMO
+              </Badge>
+            ) : null}
             <Badge variant="secondary" className="gap-1.5">
               <ShieldCheck className="size-3.5 text-emerald-400" aria-hidden="true" />
-              Read-only MVP
+              Bezpečný režim
             </Badge>
             <Separator orientation="vertical" className="h-6" />
             <div className="flex items-center gap-2 text-xs text-muted-foreground">

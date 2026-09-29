@@ -17,6 +17,9 @@ Open-source desktopová diagnostika přes OBDLink EX. Základní profil použív
 
 - Tauri 2 backend v Rustu a React 19/Vite/TypeScript frontend
 - moderní tmavý dashboard postavený na Tailwind CSS a shadcn/ui
+- společná STN transportní abstrakce pro reálný USB port a deterministickou offline demo relaci
+- offline demo pro vývoj UI bez adaptéru a vozidla; testovací odpovědi procházejí stejnými OBD-II/UDS parsery jako reálný transport
+- verzované JSON manifesty profilů se schema kontrolou, deklarovanými službami, původem dat a explicitními ECU variant matchery
 - výčet a volba sériových portů včetně preferování macOS `/dev/cu.*`
 - asynchronní Tauri IPC nad dedikovaným serial workerem
 - volba diagnostického profilu před připojením
@@ -27,10 +30,12 @@ Open-source desktopová diagnostika přes OBDLink EX. Základní profil použív
 - AT/ST, OBD-II i UDS komunikace zobrazovaná v živé konzoli
 - kontrola identity, firmware, napětí, zvoleného a detekovaného protokolu
 - diagnostická navigace: motor, vstřikování, DPF, turbo, elektrická síť, emise, palivo, převodovka, jízdní režimy, podvozek, interiér, karoserie, okna a dveře, světla, exteriér, klimatizace a infotainment
-- dávkové read-only čtení živých hodnot ECU motoru přes UDS `ReadDataByIdentifier (0x22)`
+- dávkové read-only čtení ECU motoru přes UDS `ReadDataByIdentifier (0x22)` až po přesné shodě čísla dílu, software a skupiny signálů; bez shody se čtou pouze identifikační DID
 - řízené živé obnovování vybrané skupiny bez překrývání sériových požadavků
 - přehled dostupnosti jednotlivých hodnot včetně bezpečného označení nepodporovaných DID
-- orientační stav každé hodnoty (`v pořádku`, `informativní`, `pozornost`, `kritické`) s vysvětlením a profilovými prahy
+- orientační stav hodnot (`v orientačním rozsahu`, `informativní`, `pozornost`, `kritické`); nejde o potvrzení bezvadnosti komponenty
+- původ a verze definic, identita ECU a explicitní rozlišení standardních, profilově spárovaných, neověřených a simulovaných vzorků
+- po 30 sekundách se vzorek označí jako zastaralý a UI skryje jeho hodnocení; simulace ani neověřená ECU nedostanou zelené hodnocení
 - read-only scan 41 očekávaných MQB ECU seskupených do deseti diagnostických pohledů
 - volitelný automatický úplný scan všech diagnostických oblastí po připojení profilu MQB s viditelným průběhem
 - identifikace nalezených jednotek přes DID `F187` a `F189`, zobrazení CAN trasy a seznam potvrzených DTC přes `19 02 08`
@@ -40,9 +45,13 @@ Open-source desktopová diagnostika přes OBDLink EX. Základní profil použív
 - testovací čtení ECU 09: `0x70E → 0x778`, UDS `22 F1 87`
 - parsování pozitivních odpovědí, UDS Negative Response Code i následné odpovědi po `0x78 ResponsePending`
 - centrum schopností oddělující dostupné čtení, plánované výkonové testy, kódování a servisní procedury
+- katalog 27 kandidátních úprav v pěti oblastech s vyhledáváním a požadavky na ECU/výbavu; nejde o potvrzenou podporu značek ani implementované zápisy
+- trvale viditelná horní navigace Diagnostika / Kódování / Servis; v demu není nutné hledat Kódování na konci seznamu ECU
 - standardní Mode `04` pouze v univerzálním profilu: přesná potvrzovací fráze, napětí nejméně 12,0 V, ověřené nulové otáčky a pevný payload bez raw-hex vstupu
 
 ## Bezpečnost
+
+Vestavěný MQB manifest zatím **neobsahuje doložené verze software**. Na skutečné ECU proto blokuje výrobce-specifické živé hodnoty i při shodě čísla dílu `04L906027P`. Jde o záměrnou ochranu před chybným dekódováním, nikoli závadu spojení. Standardní OBD-II, identifikace jednotek, DTC a explicitní raw průzkum zůstávají dostupné. Demo není důkazem kompatibility s vozidlem.
 
 Automotive diagnostika není běžná práce se sériovým portem. Nesprávný rámec, přerušený zápis nebo nízké napětí může způsobit ztrátu konfigurace ECU nebo nepojízdné vozidlo.
 
@@ -78,13 +87,16 @@ npm run dev
 
 Po připojení adaptéru se na macOS typicky objeví `/dev/cu.usbserial-*`. Aplikace sloučí dvojici `/dev/tty.*` a `/dev/cu.*` a preferuje callout zařízení `/dev/cu.*`.
 
+Pro práci bez auta zvolte profil a stiskněte **Demo**. Aplikace relaci viditelně označí jako `OFFLINE DEMO`; lze v ní zkoušet živá data, VIN, DTC, MQB scan i bezpečnostní workflow bez fyzického zápisu na sběrnici.
+
 ## Kontroly a build
 
 ```bash
 npm run check
+npm test # Node.js >= 22.6 s podporou --experimental-strip-types
 npm run build
-cd src-tauri && cargo test
-cd src-tauri && cargo clippy --all-targets -- -D warnings
+cargo test --manifest-path src-tauri/Cargo.toml
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 npm run tauri build
 ```
 
@@ -104,7 +116,7 @@ src/
 
 src-tauri/src/
 ├── commands/              # Tauri command boundary
-├── transport/serial/      # výčet portů a single-owner worker
+├── transport/             # STN serial/demo transport a single-owner worker
 ├── adapter/stn/           # AT/ST klient a parser promptu
 ├── protocol/
 │   ├── obd2/              # standardní typované dotazy a parsování
@@ -115,11 +127,12 @@ src-tauri/src/
 └── events.rs              # log a connection-state events
 ```
 
-Podrobnosti jsou v [architektonickém popisu](docs/ARCHITECTURE.md), [poznámkách k OBDLink EX](docs/OBDLINK_EX.md) a [pravidlech pro profily vozidel](docs/VEHICLE_PROFILES.md).
+Podrobnosti jsou v [architektonickém popisu](docs/ARCHITECTURE.md), [poznámkách k OBDLink EX](docs/OBDLINK_EX.md), [návrhu diagnostických dat a ODX](docs/DIAGNOSTIC_DATA.md) a [pravidlech pro profily vozidel](docs/VEHICLE_PROFILES.md).
 
 ## Referenční dokumentace
 
-- [OBDLink Family Reference and Programming Manual](https://www.scantool.net/scantool/downloads/98/stn11xx21xx_frpm-c.pdf)
+- [OBDLink Family Reference and Programming Manual, revize F](https://www.scantool.net/scantool/downloads/682/obdlink_frpm_f.pdf)
+- [ASAM MCD-2 D / ODX](https://www.asam.net/standards/detail/mcd-2-d/)
 - [VAG UDS CAN ID catalog](https://github.com/ConnorHowell/vag-uds-ids) — komunitní katalog adres extrahovaných z diagnostických dat ODIS
 - [MQB-sniffer](https://github.com/mrfixpl/MQB-sniffer) a [VAG-CP-Docs](https://github.com/dspl1236/VAG-CP-Docs/blob/main/technical/cp-offline-resolution.md) — doplňkové křížové ověření vybraných tras
 - ISO 14229 (UDS) a ISO 15765-2 jsou normy chráněné autorským právem; pro produkční implementaci použijte licencované znění.

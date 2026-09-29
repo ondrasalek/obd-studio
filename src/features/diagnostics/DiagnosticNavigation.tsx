@@ -45,46 +45,50 @@ export function DiagnosticNavigation({
 }: DiagnosticNavigationProps) {
   return (
     <Card className="min-h-0 flex-1 overflow-hidden">
-      <CardHeader className="border-b pb-3">
+      <CardHeader className="shrink-0 border-b pb-3">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <CardTitle>Diagnostické oblasti</CardTitle>
-            <CardDescription>Vyberte systém vozidla</CardDescription>
+            <CardTitle className="text-sm">Oblasti vozidla</CardTitle>
+            <CardDescription className="text-xs">
+              Čtení a diagnostika
+            </CardDescription>
           </div>
           <Badge variant="outline" className="font-mono text-[10px]">
             {DIAGNOSTIC_SECTIONS.length} oblastí
           </Badge>
         </div>
       </CardHeader>
-      <CardContent className="min-h-0 flex-1 px-2 py-2">
-        <ScrollArea className="h-full">
-          <nav aria-label="Diagnostické oblasti" className="space-y-4 py-1">
-            {DIAGNOSTIC_SECTION_GROUPS.map((group) => (
-              <div key={group.label}>
-                <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/70">
-                  {group.label}
-                </p>
-                <div className="space-y-0.5">
-                  {group.sections.map((section) => (
-                    <NavigationItem
-                      key={section.id}
-                      section={section}
-                      selected={selected === section.id}
-                      profiled={profile === "vwMqb"}
-                      connected={connected}
-                      loaded={Boolean(
-                        (section.liveGroup && snapshots[section.liveGroup]) ||
+      <CardContent className="relative min-h-0 flex-1 px-0 py-0">
+        <div className="absolute inset-x-2 inset-y-0">
+          <ScrollArea className="h-full" type="always">
+            <nav aria-label="Diagnostické oblasti" className="space-y-4 py-1">
+              {DIAGNOSTIC_SECTION_GROUPS.map((group) => (
+                <div key={group.label}>
+                  <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/70">
+                    {group.label}
+                  </p>
+                  <div className="space-y-0.5">
+                    {group.sections.map((section) => (
+                      <NavigationItem
+                        key={section.id}
+                        section={section}
+                        selected={selected === section.id}
+                        profiled={profile === "vwMqb"}
+                        connected={connected}
+                        loaded={Boolean(
+                          (section.liveGroup && snapshots[section.liveGroup]) ||
                           (section.controlUnitArea &&
                             controlUnitSnapshots[section.controlUnitArea]),
-                      )}
-                      onSelect={onSelect}
-                    />
-                  ))}
+                        )}
+                        onSelect={onSelect}
+                      />
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </nav>
-        </ScrollArea>
+              ))}
+            </nav>
+          </ScrollArea>
+        </div>
       </CardContent>
     </Card>
   );
@@ -131,19 +135,33 @@ function NavigationItem({
         <Icon className="size-4" aria-hidden="true" />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-xs font-medium">{section.title}</span>
+        <span className="block truncate text-xs font-medium">
+          {section.title}
+        </span>
         <span className="mt-0.5 block truncate text-[10px] font-normal text-muted-foreground">
           {section.description}
         </span>
       </span>
       {loaded ? (
-        <CheckCircle2 className="size-3.5 shrink-0 text-emerald-400" aria-label="Data načtena" />
+        <CheckCircle2
+          className="size-3.5 shrink-0 text-emerald-400"
+          aria-label="Data načtena"
+        />
       ) : profiledReady && connected ? (
-        <Radio className="size-3.5 shrink-0 text-cyan-400" aria-label="Připraveno ke čtení" />
+        <Radio
+          className="size-3.5 shrink-0 text-cyan-400"
+          aria-label="Připraveno ke čtení"
+        />
       ) : section.availability === "planned" ? (
-        <Clock3 className="size-3.5 shrink-0 text-muted-foreground/60" aria-label="Připravujeme" />
+        <Clock3
+          className="size-3.5 shrink-0 text-muted-foreground/60"
+          aria-label="Připravujeme"
+        />
       ) : (
-        <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
+        <ChevronRight
+          className="size-3.5 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5"
+          aria-hidden="true"
+        />
       )}
     </Button>
   );

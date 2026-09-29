@@ -3,13 +3,10 @@ use crate::error::{AppError, AppResult};
 use crate::events::{emit_log, LogDirection, LogKind};
 use crate::protocol::obd2::ValidatedObdRequest;
 use crate::protocol::uds::ValidatedUdsRequest;
+use crate::transport::stn::StnTransport;
 use crate::vehicle::DiagnosticProfile;
-use serialport::{ClearBuffer, SerialPort};
-use std::io::ErrorKind;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tauri::AppHandle;
-
-const MAX_REPLY_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct AdapterIdentity {
@@ -21,17 +18,17 @@ pub struct AdapterIdentity {
 }
 
 pub struct StnClient<'a> {
-    port: &'a mut dyn SerialPort,
+    transport: &'a mut dyn StnTransport,
     app: &'a AppHandle,
 }
 
 impl<'a> StnClient<'a> {
-    pub fn new(port: &'a mut dyn SerialPort, app: &'a AppHandle) -> Self {
-        Self { port, app }
+    pub fn new(transport: &'a mut dyn StnTransport, app: &'a AppHandle) -> Self {
+        Self { transport, app }
     }
 
     pub fn initialize(&mut self, profile: DiagnosticProfile) -> AppResult<AdapterIdentity> {
-        let _ = self.port.clear(ClearBuffer::Input);
+        self.transport.clear_input()?;
 
         let reset = self.transact("ATZ", Duration::from_millis(2_500), LogKind::At)?;
         if reset.lines.is_empty() {
@@ -230,51 +227,7 @@ impl<'a> StnClient<'a> {
 
     fn transact(&mut self, command: &str, timeout: Duration, kind: LogKind) -> AppResult<StnReply> {
         emit_log(self.app, LogDirection::Tx, kind.clone(), command);
-
-        let mut wire_command = command.as_bytes().to_vec();
-        wire_command.push(b'\r');
-        self.port
-            .write_all(&wire_command)
-            .map_err(|error| AppError::serial(format!("Zápis na port selhal: {error}")))?;
-        self.port
-            .flush()
-            .map_err(|error| AppError::serial(format!("Flush portu selhal: {error}")))?;
-
-        let deadline = Instant::now() + timeout;
-        let mut received = Vec::with_capacity(512);
-        let mut buffer = [0_u8; 256];
-
-        while Instant::now() < deadline {
-            match self.port.read(&mut buffer) {
-                Ok(0) => continue,
-                Ok(count) => {
-                    received.extend_from_slice(&buffer[..count]);
-                    if received.contains(&b'>') {
-                        break;
-                    }
-                    if received.len() > MAX_REPLY_BYTES {
-                        return Err(AppError::adapter(
-                            "Odpověď adaptéru překročila bezpečný limit 64 KiB.",
-                        ));
-                    }
-                }
-                Err(error) if error.kind() == ErrorKind::TimedOut => continue,
-                Err(error) if error.kind() == ErrorKind::Interrupted => continue,
-                Err(error) => {
-                    return Err(AppError::serial(format!(
-                        "Čtení ze sériového portu selhalo: {error}"
-                    )))
-                }
-            }
-        }
-
-        if !received.contains(&b'>') {
-            return Err(AppError::adapter(format!(
-                "Timeout při čekání na prompt po příkazu {command}."
-            )));
-        }
-
-        let raw = String::from_utf8_lossy(&received).into_owned();
+        let raw = self.transport.exchange(command, timeout)?;
         emit_log(
             self.app,
             LogDirection::Rx,

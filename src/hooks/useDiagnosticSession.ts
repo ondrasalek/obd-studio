@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   clearEmissionDtcs as invokeClearEmissionDtcs,
+  connectDemo as invokeConnectDemo,
   connectPort,
   disconnectPort,
   isTauriRuntime,
@@ -204,6 +205,26 @@ export function useDiagnosticSession() {
     }
   }, [runtimeAvailable, selectedPort, selectedProfile]);
 
+  const connectDemo = useCallback(async () => {
+    if (!runtimeAvailable) {
+      return;
+    }
+    setBusy(true);
+    setError(undefined);
+    setConnectionState("connecting");
+    try {
+      const info = await invokeConnectDemo(selectedProfile);
+      setConnection(info);
+      setConnectionState("busReady");
+    } catch (caught) {
+      setConnection(undefined);
+      setConnectionState("error");
+      setError(normalizeCommandError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }, [runtimeAvailable, selectedProfile]);
+
   const disconnect = useCallback(async () => {
     setBusy(true);
     setError(undefined);
@@ -390,6 +411,7 @@ export function useDiagnosticSession() {
     serviceBusy,
     refreshPorts,
     connect,
+    connectDemo,
     disconnect,
     runStandardObdQuery,
     readCentralElectronics,

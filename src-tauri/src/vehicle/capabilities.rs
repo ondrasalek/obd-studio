@@ -38,6 +38,7 @@ pub struct VehicleCapability {
     pub risk: CapabilityRisk,
     pub target_section: Option<&'static str>,
     pub requirements: Vec<&'static str>,
+    pub category: Option<&'static str>,
 }
 
 pub fn capabilities(profile: DiagnosticProfile) -> Vec<VehicleCapability> {
@@ -47,7 +48,7 @@ pub fn capabilities(profile: DiagnosticProfile) -> Vec<VehicleCapability> {
         read("pressures", "Tlaky motoru a přeplňování", "Tlak v sání, barometrický tlak, tlak paliva a profilové hodnoty turba.", "turbo"),
         read("air-fuel", "Průtok vzduchu a směs", "MAF, korekce směsi, poloha klapky a podporované lambda/NOx údaje.", "emissions"),
         read("electrical", "Elektrická síť", "Napětí palubní sítě a orientační vyhodnocení baterie a dobíjení.", "electrical"),
-        read("emissions", "Emise a DPF/GPF", "Standardní emisní PID a ověřené MQB hodnoty sazí, popela a regenerace.", "dpf"),
+        read("emissions", "Emise a DPF/GPF", "Standardní emisní PID; výrobce-specifické MQB hodnoty vyžadují přesnou shodu ECU, software a skupiny signálů.", "dpf"),
         read("fuel", "Palivová data", "Hladina paliva, tlak v liště a okamžitý průtok, pokud je ECU poskytuje.", "fuel"),
         catalog_entry(
             "transmission-temperature",
@@ -105,34 +106,7 @@ pub fn capabilities(profile: DiagnosticProfile) -> Vec<VehicleCapability> {
         ),
     ];
 
-    let profile_state = CapabilityState::ProfileRequired;
-
-    for (id, title, description, risk) in [
-        ("start-stop", "Start-Stop", "Výchozí stav, paměť nebo obrácení logiky tlačítka.", CapabilityRisk::Medium),
-        ("scandinavian-lights", "Skandinávské denní svícení", "Zadní světla společně s denním svícením.", CapabilityRisk::Medium),
-        ("corner-lights", "Přisvěcování do zatáček", "Aktivace a parametry corner funkce.", CapabilityRisk::Medium),
-        ("coming-home", "Coming / Leaving Home", "Délka, spouštěcí podmínky a světelné výstupy.", CapabilityRisk::Medium),
-        ("comfort-windows", "Komfortní ovládání oken", "Dálkové nebo dešťové zavírání oken.", CapabilityRisk::High),
-        ("mirror-fold", "Sklápění zrcátek", "Sklopení ihned po zamknutí.", CapabilityRisk::Medium),
-        ("needle-sweep", "Needle Sweep", "Protočení ručiček po zapnutí zapalování.", CapabilityRisk::Medium),
-        ("cluster-layout", "Grafika přístrojového štítu", "Pouze varianty explicitně kompatibilní s konkrétním hardwarem a softwarem štítu.", CapabilityRisk::High),
-        ("hidden-menus", "Rozšířené menu přístrojů", "Teplota oleje, stopky a další položky podporované danou jednotkou.", CapabilityRisk::Medium),
-        ("ambient-colors", "Ambientní osvětlení", "Paleta barev a dostupné světelné zóny.", CapabilityRisk::Medium),
-        ("lock-confirmation", "Potvrzení zamknutí", "Akustické potvrzení podporovaným výstupem vozidla.", CapabilityRisk::Medium),
-        ("seat-heating-memory", "Paměť vyhřívání", "Obnovení posledního stavu sedadel nebo volantu.", CapabilityRisk::Medium),
-        ("video-in-motion", "Video in Motion", "Funkce může být právně omezená a zvyšuje riziko rozptýlení řidiče.", CapabilityRisk::High),
-        ("seatbelt-warning", "Výstraha bezpečnostních pásů", "Bezpečnostní funkce; aplikace ji bez jurisdikčního a profilového povolení nezpřístupní.", CapabilityRisk::High),
-    ] {
-        values.push(catalog_entry(
-            id,
-            title,
-            description,
-            CapabilityKind::Coding,
-            profile_state,
-            risk,
-            vec!["Přesná identita ECU", "Záloha původní hodnoty", "Napětí alespoň 12,5 V", "Ověřený coding profil"],
-        ));
-    }
+    values.extend(super::coding_catalog::coding_capabilities());
 
     for (id, title, description, risk) in [
         (
@@ -205,6 +179,7 @@ fn read(
         risk: CapabilityRisk::ReadOnly,
         target_section: Some(target_section),
         requirements: Vec::new(),
+        category: None,
     }
 }
 
@@ -232,6 +207,7 @@ fn catalog_entry(
         risk,
         target_section: Some(target_section),
         requirements,
+        category: None,
     }
 }
 

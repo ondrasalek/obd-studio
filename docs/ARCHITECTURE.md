@@ -2,12 +2,13 @@
 
 ## Zásady
 
-1. Sériový port má právě jednoho vlastníka.
+1. Aktivní STN transport má právě jednoho vlastníka.
 2. Frontend nikdy neposílá AT/ST příkazy přímo.
 3. Profil se volí před otevřením portu a určuje inicializaci adaptéru i povolené příkazy.
 4. Každý OBD-II nebo UDS request prochází Rust allowlist policy.
 5. IPC vrací strukturované výsledky; surový provoz teče samostatnými eventy do konzole.
 6. Připojení, transport, protokol a definice vozidla jsou oddělené vrstvy.
+7. Offline demo používá stejné parsery jako sériový transport a musí být v UI nezaměnitelně označené.
 
 ## Tok požadavku
 
@@ -20,6 +21,7 @@ Tauri command
     ▼
 DiagnosticHandle ── mpsc ──► SerialWorker thread
                                 │
+                                ├─ serial or deterministic demo transport
                                 ├─ enforce active profile
                                 ├─ validate profile and typed operation policy
                                 ├─ OBD-II payload or targeted STPX request
@@ -30,7 +32,7 @@ DiagnosticHandle ── mpsc ──► SerialWorker thread
     ◄────────────── tokio oneshot ───────┘
 ```
 
-Worker používá blokující API crate `serialport` na vlastním vlákně. Tauri async command proto neblokuje UI ani async runtime, ale současně nevznikají souběžné zápisy do stejného UARTu. MPSC fronta serializuje connect, disconnect, OBD-II a UDS operace; oneshot kanál doručí odpověď konkrétnímu IPC volání.
+Worker používá blokující transport na vlastním vlákně. Produkční `SerialStnTransport` obaluje crate `serialport`; `DemoStnTransport` generuje deterministické surové STN odpovědi pro vývoj bez auta. Tauri async command proto neblokuje UI ani async runtime, ale současně nevznikají souběžné transakce. MPSC fronta serializuje connect, disconnect, OBD-II a UDS operace; oneshot kanál doručí odpověď konkrétnímu IPC volání.
 
 ## Vrstvy backendu
 
@@ -40,11 +42,17 @@ Worker používá blokující API crate `serialport` na vlastním vlákně. Taur
 
 ### `transport::serial`
 
-Vyhledává porty, sjednocuje macOS dial-in/callout názvy a vlastní otevřený port. Worker zajišťuje sekvenční zpracování a životní cyklus spojení.
+Vyhledává porty, sjednocuje macOS dial-in/callout názvy a řídí životní cyklus relace. Worker vlastní jedinou instanci transportu a zajišťuje sekvenční zpracování.
+
+### `transport::stn`
+
+Definuje half-duplex command transport zakončený promptem `>`. Sériová implementace řeší CR terminátor, krátké read timeouty, maximální velikost odpovědi, macOS `/dev/cu.*` a zachování bytů za promptem. Demo implementace vrací raw AT/ST, OBD-II a UDS odpovědi, které dále zpracovává produkční `StnClient`; frontend nedostává předem dekódované zkratky.
 
 ### `adapter::stn`
 
-Implementuje request/response terminál OBDLinku. Každý příkaz končí `CR`, čtení vždy čeká na prompt `>`, omezuje velikost odpovědi a převádí známé STN chyby na `AppError`. Inicializace je profilová: `ATSP0` pro automatický standardní OBD-II režim, `STP 33` pro pevný MQB HS-CAN profil.
+Implementuje AT/ST request/response klienta OBDLinku nad zvoleným transportem a převádí známé STN chyby na `AppError`. Inicializace je profilová: `ATSP0` pro automatický standardní OBD-II režim, `STP 33` pro pevný MQB HS-CAN profil.
+
+ISO-TP segmentaci, sestavení více rámců a flow control zajišťuje v této konfiguraci firmware OBDLinku (`STCSEGT`, `STCSEGR`, `ATCFC` a flow-control páry). Aplikace proto neimplementuje druhý konkurenční ISO-TP stavový automat nad textovým STN rozhraním. Vlastní ISO-TP stack by dával smysl až pro jiný typ CAN transportu, který předává surové rámce a neposkytuje tuto službu.
 
 ### `protocol::obd2`
 
@@ -56,7 +64,7 @@ Normalizuje hex, kontroluje 11bit CAN ID, timeout a povolenou service. Parser ro
 
 ### `vehicle`
 
-Obsahuje identitu diagnostického profilu, předvolby ECU, katalog očekávaných MQB jednotek a deklarativní definice živých signálů včetně DID, jednotky, dekodéru a orientačního hodnocení. Dávkové čtení jedné skupiny vybere fyzický cíl pouze jednou; nepodporovaný DID označí samostatně a nepřeruší kvůli němu ostatní hodnoty. Hodnocení vzniká v profilové vrstvě backendu, aby bylo testovatelné a později verzovatelné podle varianty ECU; UI pouze vykresluje vrácený stav a vysvětlení.
+Obsahuje identitu diagnostického profilu, verzovaný manifest, předvolby ECU, katalog očekávaných MQB jednotek a definice signálů. Manifest schema 2 kontroluje ID, read/write SID, původ dat a variant matchery. `verified_live_data` před každou výrobce-specifickou skupinou znovu načte identitu motorové ECU; `verification` vyžaduje přesné číslo dílu, verzi software a skupinu signálů. Bez shody se signálové DID vůbec neodesílají. Prázdný seznam verzí znamená nedoloženou kompatibilitu, ne wildcard. Dávkové čtení vybere fyzický cíl pouze jednou; nepodporovaný DID po úspěšné kontrole označí samostatně. Backend vrací původ dat a orientační hodnocení. UI potlačí hodnocení pro simulaci, neověřenou ECU a vzorek starší 30 sekund. Podrobnosti a aktuální omezení jsou v `DIAGNOSTIC_DATA.md`.
 
 `scan_control_units` přijímá typovanou oblast, nikoli uživatelský CAN rozsah. Worker sekvenčně zkouší pouze deklarované fyzické trasy, čte číslo dílu (`F187`), verzi software (`F189`) a potvrzené DTC podle status masky `0x08` (`19 02 08`). Z odpovědi `59 02` vrací kód, status, failure type i raw záznam. Jednotlivé timeouty jsou izolované, takže nepřítomná volitelná ECU nepřeruší celou oblast. Výsledek rozlišuje odpověď ECU, běžnou nepřítomnost/neodpověď a transportní chybu.
 
@@ -91,7 +99,7 @@ Budoucí write workflow nesmí pouze rozšířit tento seznam. Potřebuje samost
 
 ## Rozšiřování
 
-- Přidat testovatelnou abstrakci `SerialIo` a nahrávky reálných STN dialogů.
+- Ukládat redigované replay záznamy nad stávající transportní abstrakcí; VIN a další identifikátory nesmějí být součástí fixture bez výslovného souhlasu.
 - Modelovat diagnostickou session a delší vícefázové procedury nad již podporovaným `0x78 ResponsePending`.
 - Doplnit centrální discovery přes instalační seznam gateway a katalog ověřených variant podle part number/software version.
 - Přidávat další značky jako explicitní, testované profily; automatická OBD-II detekce se nesmí zaměňovat za univerzální výrobce-specifickou diagnostiku.

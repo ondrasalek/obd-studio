@@ -307,7 +307,7 @@ export const DIAGNOSTIC_SECTION_GROUPS: DiagnosticSectionGroup[] = [
         title: "Kódování",
         description: "Komfort, světla, okna a přístroje",
         icon: Code2,
-        availability: "planned",
+        availability: "utility",
       },
       {
         id: "service",

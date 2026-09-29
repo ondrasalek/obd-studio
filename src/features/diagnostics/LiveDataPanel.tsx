@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   AlertCircle,
@@ -19,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { canDisplayMeasurement, isSnapshotStale, presentAssessment } from "@/lib/live-data-presentation";
 import type {
   DiagnosticProfile,
   LiveDataAssessment,
@@ -26,6 +28,7 @@ import type {
   LiveDataGroup,
   LiveDataSnapshot,
   LiveDataValue,
+  LiveDataVerification,
 } from "@/types/diagnostics";
 
 interface LiveDataPanelProps {
@@ -55,7 +58,7 @@ const ASSESSMENT_CONFIG: Record<
   { label: string; icon: LucideIcon; className: string; iconClassName: string }
 > = {
   normal: {
-    label: "V pořádku",
+    label: "V orientačním rozsahu",
     icon: CheckCircle2,
     className: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300",
     iconClassName: "text-emerald-400",
@@ -101,9 +104,10 @@ export function LiveDataPanel({
   onRefresh,
 }: LiveDataPanelProps) {
   const canRead = connected && !busy;
+  const stale = useSnapshotStale(snapshot?.capturedAtMs);
   const availableCount =
     snapshot?.values.filter(
-      (signal) => signal.status === "available",
+      (signal) => canDisplayMeasurement(signal, snapshot.verification),
     ).length ?? 0;
 
   return (
@@ -120,10 +124,12 @@ export function LiveDataPanel({
                 — {description}
               </span>
               {snapshot ? (
-                <CheckCircle2
-                  className="size-4 text-emerald-400"
-                  aria-label="Data byla načtena"
-                />
+                <Badge variant="outline" className="text-[10px]">
+                  {snapshot.verification.status === "unverified"
+                    ? "Neověřená ECU"
+                    : stale ? "Zastaralá data"
+                    : snapshot.verification.status === "simulated" ? "Simulace" : "Vzorek načten"}
+                </Badge>
               ) : null}
             </div>
             <div className="mt-1 flex items-center gap-2 text-[10px] text-muted-foreground">
@@ -185,7 +191,7 @@ export function LiveDataPanel({
         ) : loading ? (
           <LiveDataSkeleton />
         ) : snapshot ? (
-          <LiveDataResults snapshot={snapshot} profile={profile} />
+          <LiveDataResults snapshot={snapshot} stale={stale} />
         ) : (
           <EmptyLiveData title={title} profile={profile} />
         )}
@@ -196,28 +202,27 @@ export function LiveDataPanel({
 
 function LiveDataResults({
   snapshot,
-  profile,
+  stale,
 }: {
   snapshot: LiveDataSnapshot;
-  profile: DiagnosticProfile;
+  stale: boolean;
 }) {
   const hasNegativeSoot = snapshot.values.some(
-    (signal) => signal.key === "dpfSootMeasured" && (signal.value ?? 0) < 0,
+    (signal) => canDisplayMeasurement(signal, snapshot.verification)
+      && signal.key === "dpfSootMeasured" && (signal.value ?? 0) < 0,
   );
 
   return (
     <div className="space-y-3">
-      <Alert className="border-0 bg-muted/55">
-        <Info aria-hidden="true" />
-        <AlertTitle>
-          {profile === "vwMqb" ? "Data aktivního MQB profilu" : "Standardní OBD-II data"}
-        </AlertTitle>
-        <AlertDescription>
-          {profile === "vwMqb"
-            ? "Význam výrobce-specifických DID je navázán na ověřenou variantu ECU; ostatní hodnoty používají legislativní OBD-II."
-            : "Zobrazeny jsou pouze standardní PID, které aktivní vozidlo skutečně podporuje. Proprietární komfortní data tento profil neodhaduje."}
-        </AlertDescription>
-      </Alert>
+      <VerificationNotice verification={snapshot.verification} />
+
+      {stale ? (
+        <Alert>
+          <Clock3 aria-hidden="true" />
+          <AlertTitle>Zobrazený vzorek není aktuální</AlertTitle>
+          <AlertDescription>Od načtení uplynulo alespoň 30 sekund nebo se změnil systémový čas. Hodnocení je skryté do obnovení čtení.</AlertDescription>
+        </Alert>
+      ) : null}
 
       {hasNegativeSoot ? (
         <Alert className="border-amber-500/20 bg-amber-500/5">
@@ -232,7 +237,7 @@ function LiveDataResults({
 
       <div className="divide-y divide-border/75" role="list" aria-label="Diagnostické hodnoty">
         {snapshot.values.map((signal) => (
-          <DiagnosticSignalRow key={signal.key} signal={signal} />
+          <DiagnosticSignalRow key={signal.key} signal={signal} verification={snapshot.verification} stale={stale} />
         ))}
       </div>
 
@@ -242,26 +247,21 @@ function LiveDataResults({
         <AlertDescription>
           Při posouzení vždy zohledněte teplotu motoru, otáčky, zatížení, okolní
           podmínky a servisní data konkrétního vozidla.
+          Zelené označení znamená pouze orientační rozsah, ne potvrzení bezvadnosti komponenty.
         </AlertDescription>
       </Alert>
     </div>
   );
 }
 
-function DiagnosticSignalRow({ signal }: { signal: LiveDataValue }) {
-  const supported = signal.status === "available";
+function DiagnosticSignalRow({ signal, verification, stale }: {
+  signal: LiveDataValue;
+  verification: LiveDataVerification;
+  stale: boolean;
+}) {
+  const supported = canDisplayMeasurement(signal, verification);
   const hasNumericValue = supported && signal.value != null;
-  const assessment: LiveDataAssessment = supported
-    ? signal.assessment
-    : {
-        level: "unknown",
-        label:
-          signal.status === "unsupported"
-            ? "ECU hodnotu nepodporuje"
-            : "Hodnotu nelze načíst",
-        detail:
-          signal.detail ?? "Řídicí jednotka nevrátila použitelnou hodnotu.",
-      };
+  const assessment = presentAssessment(signal, verification, stale);
   const config = ASSESSMENT_CONFIG[assessment.level];
   const StatusIcon = config.icon;
 
@@ -297,7 +297,8 @@ function DiagnosticSignalRow({ signal }: { signal: LiveDataValue }) {
 
       <div className="flex min-w-40 flex-col items-end justify-between text-right">
         <span className="font-mono text-[10px] text-muted-foreground">
-          {hasNumericValue ? "načteno" : supported ? "syrová data" : "bez hodnoty"}
+          {verification.status === "simulated" ? "simulace · " : ""}
+          {stale ? "historický vzorek" : hasNumericValue ? "načteno" : supported ? "syrová data" : "bez hodnoty"}
         </span>
         <p className="flex items-baseline justify-end gap-2 font-mono">
           <span className="text-2xl font-semibold tracking-tight tabular-nums">
@@ -319,9 +320,47 @@ function AssessmentBadge({ assessment }: { assessment: LiveDataAssessment }) {
       className={cn("gap-1 text-[10px]", config.className)}
       aria-label={`${config.label}: ${assessment.label}. ${assessment.detail}`}
     >
-      {config.label}
+      {assessment.label}
     </Badge>
   );
+}
+
+function VerificationNotice({ verification }: { verification: LiveDataVerification }) {
+  const titles: Record<LiveDataVerification["status"], string> = {
+    standard: "Standardní OBD-II definice",
+    matched: "ECU odpovídá datovému profilu",
+    unverified: "Výrobce-specifické měření je zablokované",
+    simulated: "Offline simulace · nejde o měření vozidla",
+  };
+  return (
+    <Alert className={cn("bg-muted/55", verification.status === "unverified" && "border-amber-500/30")}>
+      <Info aria-hidden="true" />
+      <AlertTitle>{titles[verification.status]}</AlertTitle>
+      <AlertDescription className="space-y-2">
+        <p>{verification.detail}</p>
+        {verification.identity ? (
+          <p className="font-mono text-xs">
+            ECU: {verification.identity.partNumber ?? "nezjištěna"}
+            {" · SW: "}{verification.identity.softwareVersion ?? "nezjištěn"}
+          </p>
+        ) : null}
+        <p className="text-xs text-muted-foreground">
+          Definice: {verification.profileId} v{verification.profileVersion} · {verification.source}
+        </p>
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+function useSnapshotStale(capturedAtMs: number | undefined): boolean {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (capturedAtMs === undefined) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, [capturedAtMs]);
+  return capturedAtMs !== undefined && isSnapshotStale(capturedAtMs, now);
 }
 
 function UnavailableState({
@@ -361,7 +400,7 @@ function EmptyLiveData({
       <h3 className="mt-4 text-sm font-medium">{title} je připraven ke čtení</h3>
       <p className="mt-1 max-w-md text-xs leading-5 text-muted-foreground">
         {profile === "vwMqb"
-          ? "Načtení používá ověřené UDS DID nebo standardní OBD-II PID. Nepodporované hodnoty nepřeruší celou skupinu."
+          ? "Před výrobce-specifickým čtením se ověří číslo dílu a software ECU. Bez přesné shody profilu se měření neprovede. Standardní PID tuto shodu nevyžadují."
           : "Načtení odešle pouze standardní OBD-II Mode 01 dotazy. Nepodporované PID budou označeny bez odhadování hodnot."}
       </p>
     </div>

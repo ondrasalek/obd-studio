@@ -9,7 +9,7 @@ mod vehicle;
 
 use app_state::AppState;
 use commands::{
-    clear_emission_dtcs, connect_port, disconnect_port, list_serial_ports,
+    clear_emission_dtcs, connect_demo, connect_port, disconnect_port, list_serial_ports,
     list_vehicle_capabilities, probe_dids, read_central_electronics, read_live_data,
     scan_control_units, send_standard_obd_query, send_uds_payload,
 };
@@ -25,6 +25,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_serial_ports,
             connect_port,
+            connect_demo,
             disconnect_port,
             list_vehicle_capabilities,
             clear_emission_dtcs,
